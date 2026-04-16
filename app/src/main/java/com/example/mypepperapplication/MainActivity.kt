@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
 
     override fun onRobotFocusGained(qiContext: QiContext) {
 
-        val text = "Ciao sono molto felice di essere al RICE lab."
+        val text = "Hello Human!"
 
         runOnUiThread {
             message.value = text
