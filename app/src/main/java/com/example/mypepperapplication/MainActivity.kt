@@ -131,6 +131,21 @@ fun Greeting(message: String, modifier: Modifier = Modifier) {
             onClick = {},
             label = { Text("Status: active") }
         )
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Controllo movimento",
+            style = MaterialTheme.typography.labelMedium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        DirectionControls(
+            onDirectionPressed = { direction ->
+                // Per ora solo stampa — il movimento lo aggiungiamo dopo
+                println("Direzione premuta: $direction")
+            }
+        )
     }
 }
 
