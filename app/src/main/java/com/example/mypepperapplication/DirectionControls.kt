@@ -74,8 +74,8 @@ fun DirectionButton(
         )
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = label, fontSize = 20.sp)
-            Text(text = description, fontSize = 9.sp)
+            Text(text = label, fontSize = 30.sp)
+            Text(text = description, fontSize = 7.sp)
         }
     }
 }
