@@ -38,7 +38,6 @@ class PepperMovementController {
         currentMovement?.requestCancellation()
         currentMovement = null
     }
-
     // qui  implemento la logica interna
 
     private fun move(x: Double, y: Double, theta: Double) {

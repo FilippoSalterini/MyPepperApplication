@@ -35,6 +35,7 @@ import androidx.compose.material3.*
 // 6. Theme progetto
 // ─────────────────────────────
 import com.example.mypepperapplication.ui.theme.MyPepperApplicationTheme
+import com.example.mypepperapplication.Direction
 
 // ─────────────────────────────
 // 7. QiSDK (Pepper)
@@ -48,6 +49,7 @@ import com.aldebaran.qi.sdk.`object`.conversation.Say
 class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
 
     private val message = mutableStateOf("Waiting for instructions...")
+    private val movementController = PepperMovementController()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +60,17 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Greeting(
                         message = message.value,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
+                        // a questo punto passo ai bottoni le relative azioni
+                        onDirectionPressed = { direction ->
+                            when (direction) {
+                                Direction.FORWARD -> movementController.moveForward()
+                                Direction.BACKWARD -> movementController.moveBackward()
+                                Direction.LEFT -> movementController.moveLeft()
+                                Direction.RIGHT -> movementController.moveRight()
+                                Direction.STOP -> movementController.stopMovement()
+                            }
+                        }
                     )
                 }
             }
@@ -71,7 +83,7 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
     }
 
     override fun onRobotFocusGained(qiContext: QiContext) {
-
+        movementController.onRobotReady(qiContext)
         val text = "Hello Human!"
 
         runOnUiThread {
@@ -85,6 +97,7 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
     }
 
     override fun onRobotFocusLost() {
+        movementController.onRobotLost() // ← NUOVO
     }
 
     override fun onRobotFocusRefused(reason: String?) {
@@ -92,14 +105,15 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
 }
 
 @Composable
-fun Greeting(message: String, modifier: Modifier = Modifier) {
+fun Greeting(message: String, modifier: Modifier = Modifier, onDirectionPressed: (Direction) -> Unit = {}
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
         verticalArrangement = Arrangement.Top
     ) {
-
+        // rivedi il text qua
         Text(
             text = "Pepper Assistant 🤖",
             style = MaterialTheme.typography.headlineMedium
@@ -141,10 +155,8 @@ fun Greeting(message: String, modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(8.dp))
 
         DirectionControls(
-            onDirectionPressed = { direction ->
-                // Per ora solo stampa — il movimento lo aggiungiamo dopo
-                println("Direzione premuta: $direction")
-            }
+            onDirectionPressed = onDirectionPressed,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
