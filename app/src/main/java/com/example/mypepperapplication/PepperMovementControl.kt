@@ -30,9 +30,8 @@ class PepperMovementController {
     fun moveForward()  = move(x =  STEP, y = 0.0, theta = 0.0)
     fun moveBackward() = move(x = -STEP, y = 0.0, theta = 0.0)
 
-    //per sinistra destra implementa amche movimento e non solo rotazione
-    fun moveLeft()     = move(x = 0.0,  y =  STEP, theta = 0.0)
-    fun moveRight()    = move(x = 0.0,  y = -STEP, theta = 0.0)
+    fun moveLeft()  = move(x = 0.3, y = 0.0, theta =  0.3)
+    fun moveRight() = move(x = 0.3, y = 0.0, theta = -0.3)
 
     fun stopMovement() {
         currentMovement?.requestCancellation()

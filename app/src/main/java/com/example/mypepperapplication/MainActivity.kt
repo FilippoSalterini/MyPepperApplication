@@ -35,8 +35,6 @@ import androidx.compose.material3.*
 // 6. Theme progetto
 // ─────────────────────────────
 import com.example.mypepperapplication.ui.theme.MyPepperApplicationTheme
-import com.example.mypepperapplication.Direction
-
 // ─────────────────────────────
 // 7. QiSDK (Pepper)
 // ─────────────────────────────
@@ -97,7 +95,7 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
     }
 
     override fun onRobotFocusLost() {
-        movementController.onRobotLost() // ← NUOVO
+        movementController.onRobotLost()
     }
 
     override fun onRobotFocusRefused(reason: String?) {
@@ -148,7 +146,7 @@ fun Greeting(message: String, modifier: Modifier = Modifier, onDirectionPressed:
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Controllo movimento",
+            text = "Pepper movement commands",
             style = MaterialTheme.typography.labelMedium
         )
 
