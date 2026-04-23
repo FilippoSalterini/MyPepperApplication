@@ -38,40 +38,29 @@ android {
     }
 
     buildFeatures {
-        compose = true
-    }
+        compose = false    // rimosso compose
+        viewBinding = true // usiamo ViewBinding + XML
 }
 
 dependencies {
     // QiSDK (Pepper)
     implementation("com.aldebaran:qisdk:1.7.5")
-
     // AndroidX
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.activity.compose)
-
-    // Compose BOM
-    implementation(platform(libs.androidx.compose.bom))
-
-    // Compose UI
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-
-    // Material 3
-    implementation(libs.androidx.material3)
-
     // Test
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-
     // Compose Test
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-
     // Debug
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.13.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
 }
+    }

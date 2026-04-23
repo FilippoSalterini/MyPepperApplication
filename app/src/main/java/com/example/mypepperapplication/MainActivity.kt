@@ -4,6 +4,7 @@ package com.example.mypepperapplication
 // 1. Android base
 // ─────────────────────────────
 import android.os.Bundle
+import android.util.Log
 
 // ─────────────────────────────
 // 2. Activity / lifecycle
@@ -45,6 +46,7 @@ import com.aldebaran.qi.sdk.builder.SayBuilder
 import com.aldebaran.qi.sdk.`object`.conversation.Say
 
 class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
+    private var qiContext: QiContext? = null
 
     private val message = mutableStateOf("Waiting for instructions...")
     private val movementController = PepperMovementController()
@@ -81,6 +83,7 @@ class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
     }
 
     override fun onRobotFocusGained(qiContext: QiContext) {
+        Log.d("MainActivity","EnterFocusGained")
         movementController.onRobotReady(qiContext)
         val text = "Hello Human!"
 
