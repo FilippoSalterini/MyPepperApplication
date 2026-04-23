@@ -1,171 +1,52 @@
 package com.example.mypepperapplication
 
-// ─────────────────────────────
-// 1. Android base
-// ─────────────────────────────
 import android.os.Bundle
 import android.util.Log
-
-// ─────────────────────────────
-// 2. Activity / lifecycle
-// ─────────────────────────────
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-
-// ─────────────────────────────
-// 3. Compose UI core
-// ─────────────────────────────
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-
-// ─────────────────────────────
-// 4. Compose layout
-// ─────────────────────────────
-import androidx.compose.foundation.layout.*
-
-// ─────────────────────────────
-// 5. Material 3
-// ─────────────────────────────
-import androidx.compose.material3.*
-
-// ─────────────────────────────
-// 6. Theme progetto
-// ─────────────────────────────
-import com.example.mypepperapplication.ui.theme.MyPepperApplicationTheme
-// ─────────────────────────────
-// 7. QiSDK (Pepper)
-// ─────────────────────────────
+import androidx.appcompat.app.AppCompatActivity
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.QiSDK
 import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
-import com.aldebaran.qi.sdk.builder.SayBuilder
-import com.aldebaran.qi.sdk.`object`.conversation.Say
+import com.example.mypepperapplication.controllers.PepperMovementController
+import com.example.mypepperapplication.databinding.ActivityMainBinding
 
-class MainActivity : ComponentActivity(), RobotLifecycleCallbacks {
-    private var qiContext: QiContext? = null
+class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
-    private val message = mutableStateOf("Waiting for instructions...")
+    private lateinit var binding: ActivityMainBinding
     private val movementController = PepperMovementController()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
         QiSDK.register(this, this)
-        enableEdgeToEdge()
-        setContent {
-            MyPepperApplicationTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        message = message.value,
-                        modifier = Modifier.padding(innerPadding),
-                        // a questo punto passo ai bottoni le relative azioni
-                        onDirectionPressed = { direction ->
-                            when (direction) {
-                                Direction.FORWARD -> movementController.moveForward()
-                                Direction.BACKWARD -> movementController.moveBackward()
-                                Direction.LEFT -> movementController.moveLeft()
-                                Direction.RIGHT -> movementController.moveRight()
-                                Direction.STOP -> movementController.stopMovement()
-                            }
-                        }
-                    )
-                }
-            }
-        }
+        setupButtons()
+    }
+
+    private fun setupButtons() {
+        binding.btnForward.setOnClickListener  { movementController.moveForward() }
+        binding.btnBackward.setOnClickListener { movementController.moveBackward() }
+        binding.btnLeft.setOnClickListener     { movementController.rotateLeft() }
+        binding.btnRight.setOnClickListener    { movementController.rotateRight() }
+        binding.btnStop.setOnClickListener     { movementController.stopMovement() }
+    }
+
+    override fun onRobotFocusGained(qiContext: QiContext?) {
+        qiContext ?: return
+        movementController.onRobotReady(qiContext)
+        runOnUiThread { binding.tvStatus.text = "✓ Robot connesso" }
+    }
+
+    override fun onRobotFocusLost() {
+        movementController.onRobotLost()
+        runOnUiThread { binding.tvStatus.text = "Connessione persa" }
+    }
+
+    override fun onRobotFocusRefused(reason: String?) {
+        runOnUiThread { binding.tvStatus.text = "Rifiutato: $reason" }
     }
 
     override fun onDestroy() {
         QiSDK.unregister(this, this)
         super.onDestroy()
-    }
-
-    override fun onRobotFocusGained(qiContext: QiContext) {
-        Log.d("MainActivity","EnterFocusGained")
-        movementController.onRobotReady(qiContext)
-        val text = "Hello Human!"
-
-        runOnUiThread {
-            message.value = text
-        }
-        val say: Say = SayBuilder.with(qiContext)
-            .withText(text)
-            .build()
-
-        say.run()
-    }
-
-    override fun onRobotFocusLost() {
-        movementController.onRobotLost()
-    }
-
-    override fun onRobotFocusRefused(reason: String?) {
-    }
-}
-
-@Composable
-fun Greeting(message: String, modifier: Modifier = Modifier, onDirectionPressed: (Direction) -> Unit = {}
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Top
-    ) {
-        // rivedi il text qua
-        Text(
-            text = "Pepper Assistant 🤖",
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-
-                Text(
-                    text = "Message",
-                    style = MaterialTheme.typography.labelMedium
-                )
-
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        AssistChip(
-            onClick = {},
-            label = { Text("Status: active") }
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "Pepper movement commands",
-            style = MaterialTheme.typography.labelMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        DirectionControls(
-            onDirectionPressed = onDirectionPressed,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MyPepperApplicationTheme {
-        Greeting("Android")
     }
 }
