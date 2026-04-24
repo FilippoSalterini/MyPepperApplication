@@ -53,4 +53,9 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         QiSDK.unregister(this, this)
         super.onDestroy()
     }
+
+    override fun onResume() {
+        super.onResume()
+        Log.d("MainActivity", "onResume — attendo focus robot...")
+    }
 }
