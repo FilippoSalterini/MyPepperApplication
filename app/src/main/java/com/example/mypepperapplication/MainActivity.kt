@@ -11,6 +11,7 @@ import com.example.mypepperapplication.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
+    private var qiContext: QiContext? = null
     private lateinit var binding: ActivityMainBinding
     private val movementController = PepperMovementController()
 
@@ -32,12 +33,14 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     }
 
     override fun onRobotFocusGained(qiContext: QiContext?) {
-        qiContext ?: return
+        this.qiContext = qiContext
         Log.d("MainActivity", "Robot focus gained")
-        movementController.onRobotReady(qiContext)
-    }
+        qiContext?.let {
+            movementController.onRobotReady(it)
+        }    }
 
     override fun onRobotFocusLost() {
+        this.qiContext = null
         Log.d("MainActivity", "Robot lost focus")
         movementController.onRobotLost()
     }

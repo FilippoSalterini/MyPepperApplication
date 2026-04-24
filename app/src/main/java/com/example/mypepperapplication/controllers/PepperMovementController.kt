@@ -42,11 +42,10 @@ class PepperMovementController {
 
     // ── Lifecycle ────────────────────────────────────────
 
-    fun onRobotReady(context: QiContext) {
-        qiContext = context
-        holdBaseRotation()  // blocca rotazione autonoma subito
+    fun onRobotReady(qiContext: QiContext) {
+        this.qiContext = qiContext
+        holdBaseRotation()
     }
-
     fun onRobotLost() {
         stopMovement()
         releaseBaseRotation()

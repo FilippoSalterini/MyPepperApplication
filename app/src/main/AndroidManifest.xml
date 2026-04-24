@@ -28,8 +28,7 @@
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
-
-                <!-- <category android:name="com.aldebaran.qi.sdk.LAUNCHER" /> -->
+                <category android:name="com.aldebaran.qi.sdk.LAUNCHER" />
 
             </intent-filter>
         </activity>
