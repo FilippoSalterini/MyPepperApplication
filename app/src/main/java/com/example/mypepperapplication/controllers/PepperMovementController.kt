@@ -32,7 +32,8 @@ private const val TAG = "PepperMovement"
 class PepperMovementController {
 
     private var qiContext: QiContext? = null //passpartuout per tutto cio che riguarda il robot
-    private var goToFuture: Future<Void>? = null //sta a rappresentare il movimento in corso. è un FUTURE VOID un oggetto che rappresenta un'operazione asincrona che non ritorna nessun valore (Void).
+    private var goToFuture: Future<Void>? = null //sta a rappresentare il movimento in corso.
+    // è un FUTURE VOID un oggetto che rappresenta un'operazione asincrona che non ritorna nessun valore (Void).
     // Lo teniamo salvato perché ci serve per cancellarlo con stopMovement().
     // Senza questo riferimento non potresti mai fermare Pepper a metà movimento.
     private var holder: Holder? = null //blocca rotazione autonoma di pepper
@@ -84,7 +85,7 @@ class PepperMovementController {
 
     // Prima di tutto il guard clause — se qiContext è null usciamo subito.
     // Poi cancelliamo qualsiasi movimento precedente —
-    // così se premi ▲ due volte in rapida successione,
+    // così se premo deu volte freccia in su in rapida successione,
     // il primo movimento viene annullato e parte il secondo.
 
         CoroutineScope(Dispatchers.IO).launch {

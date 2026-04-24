@@ -17,7 +17,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         QiSDK.register(this, this)
-        Log.d("MainActivity", "QiSDK.register chiamato") // ← aggiungi
+        Log.d("MainActivity", "QiSDK.register chiamato")
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setupButtons()
@@ -35,27 +35,19 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         qiContext ?: return
         Log.d("MainActivity", "Robot focus gained")
         movementController.onRobotReady(qiContext)
-        runOnUiThread { binding.tvStatus.text = "✓ Robot connesso" }
     }
 
     override fun onRobotFocusLost() {
         Log.d("MainActivity", "Robot lost focus")
         movementController.onRobotLost()
-        runOnUiThread { binding.tvStatus.text = "Connessione persa" }
     }
 
     override fun onRobotFocusRefused(reason: String?) {
         Log.d("MainActivity", "Robot focus refused: $reason")
-        runOnUiThread { binding.tvStatus.text = "Rifiutato: $reason" }
     }
 
     override fun onDestroy() {
         QiSDK.unregister(this, this)
         super.onDestroy()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        Log.d("MainActivity", "onResume — attendo focus robot...")
     }
 }
