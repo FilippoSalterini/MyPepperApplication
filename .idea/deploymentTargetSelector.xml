@@ -4,10 +4,10 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-04-24T15:38:51.473051300Z">
+        <DropdownSelection timestamp="2026-04-27T08:53:55.675536100Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="Default" identifier="serial=10.186.13.59:5555;connection=ae77c67d" />
+              <DeviceId pluginId="LocalEmulator" identifier="path=C:\Users\salte\.android\avd\Medium_Phone.avd" />
             </handle>
           </Target>
         </DropdownSelection>

@@ -2,9 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-feature
-        android:name="com.softbank.hardware.pepper"
-        android:required="false" />
+    <uses-feature android:name="com.softbankrobotics.hardware.pepper" android:required="true" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -26,10 +24,8 @@
             android:theme="@style/Theme.MyPepperApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="com.aldebaran.qi.sdk.LAUNCHER" />
-
             </intent-filter>
         </activity>
     </application>

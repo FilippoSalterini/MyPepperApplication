@@ -17,7 +17,10 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d("MainActivity", "REGISTER BEFORE UI")
+
         QiSDK.register(this, this)
+
         Log.d("MainActivity", "QiSDK.register chiamato")
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -32,12 +35,12 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         binding.btnStop.setOnClickListener     { movementController.stopMovement() }
     }
 
-    override fun onRobotFocusGained(qiContext: QiContext?) {
+    override fun onRobotFocusGained(qiContext: QiContext) {
+        Log.d("MainActivity", "GAINED CALLBACK")
         this.qiContext = qiContext
         Log.d("MainActivity", "Robot focus gained")
-        qiContext?.let {
-            movementController.onRobotReady(it)
-        }    }
+        movementController.onRobotReady(qiContext)
+    }
 
     override fun onRobotFocusLost() {
         this.qiContext = null
@@ -47,6 +50,17 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     override fun onRobotFocusRefused(reason: String?) {
         Log.d("MainActivity", "Robot focus refused: $reason")
+    }
+// ON RESUME E ON PAUSE
+    override fun onResume() {
+        super.onResume()
+        QiSDK.register(this, this)
+        Log.d("MainActivity", "onResume register")
+    }
+
+    override fun onPause() {
+        QiSDK.unregister(this, this)
+        super.onPause()
     }
 
     override fun onDestroy() {

@@ -40,7 +40,6 @@ android {
 }
 
 dependencies {
-    // ✅ gruppo e versione corretti
     implementation("com.softbankrobotics:qisdk:1.8.6") {
         exclude(group = "com.android.support", module = "support-compat")
     }
