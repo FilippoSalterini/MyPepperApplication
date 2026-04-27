@@ -39,7 +39,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         Log.d("MainActivity", "GAINED CALLBACK")
         this.qiContext = qiContext
         Log.d("MainActivity", "Robot focus gained")
-        movementController.onRobotReady(qiContext)
+        //movementController.onRobotReady(qiContext)
     }
 
     override fun onRobotFocusLost() {
@@ -51,20 +51,10 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     override fun onRobotFocusRefused(reason: String?) {
         Log.d("MainActivity", "Robot focus refused: $reason")
     }
-// ON RESUME E ON PAUSE
-    override fun onResume() {
-        super.onResume()
-        QiSDK.register(this, this)
-        Log.d("MainActivity", "onResume register")
-    }
-
-    override fun onPause() {
-        QiSDK.unregister(this, this)
-        super.onPause()
-    }
 
     override fun onDestroy() {
         QiSDK.unregister(this, this)
+        Log.d("MainActivity", "Unregistered")
         super.onDestroy()
     }
 }
