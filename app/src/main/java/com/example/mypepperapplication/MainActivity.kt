@@ -39,7 +39,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         Log.d("MainActivity", "GAINED CALLBACK")
         this.qiContext = qiContext
         Log.d("MainActivity", "Robot focus gained")
-        //movementController.onRobotReady(qiContext)
+        movementController.onRobotReady(qiContext)
     }
 
     override fun onRobotFocusLost() {

@@ -79,30 +79,28 @@ class PepperMovementController {
             return
         }
 
-        // Cancella movimento precedente
         goToFuture?.requestCancellation()
-
-    // Prima di tutto il guard clause — se qiContext è null usciamo subito.
-    // Poi cancelliamo qualsiasi movimento precedente —
-    // così se premo deu volte freccia in su in rapida successione,
-    // il primo movimento viene annullato e parte il secondo.
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val actuation: Actuation = ctx.actuation
-                val robotFrame: Frame    = actuation.robotFrame()
-                val transform: Transform = TransformBuilder.create()
-                    .from2DTransform(x, y, theta)
-                val mapping: Mapping    = ctx.mapping
+                val actuation  = ctx.actuation
+                val mapping    = ctx.mapping
+                val robotFrame = actuation.robotFrame()
 
-                val targetFrame: FreeFrame = mapping.makeFreeFrame()
-                targetFrame.update(robotFrame, transform, 0L)
+                val transform = TransformBuilder.create()
+                    .from2DTransform(x, y, theta)
+
+                // timestamp in microsecondi, non 0L
+                val timestampUs = System.currentTimeMillis() * 1000L
+
+                val targetFrame = mapping.makeFreeFrame()
+                targetFrame.update(robotFrame, transform, timestampUs)
 
                 val goTo = GoToBuilder.with(ctx)
                     .withFrame(targetFrame.frame())
-                    .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-                    .withMaxSpeed(0.2F)
-                    .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
+                    .withFinalOrientationPolicy(OrientationPolicy.FREE_ORIENTATION) //non richiede mappa
+                    .withMaxSpeed(0.35F)
+                    //rimosso PathPlanningPolicy.STRAIGHT_LINES_ONLY — richiede mappa
                     .build()
 
                 goToFuture = goTo.async().run()
