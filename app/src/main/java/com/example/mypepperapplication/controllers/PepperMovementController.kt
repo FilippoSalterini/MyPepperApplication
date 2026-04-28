@@ -38,7 +38,7 @@ class PepperMovementController {
     // Senza questo riferimento non potresti mai fermare Pepper a metà movimento.
     private var holder: Holder? = null //blocca rotazione autonoma di pepper
 
-    private val STEP = 0.5
+    private val STEP = 0.9
 
     // ── Lifecycle ────────────────────────────────────────
 
@@ -56,8 +56,8 @@ class PepperMovementController {
 
     fun moveForward()  = moveRobot(x =  STEP, y = 0.0, theta = 0.0)
     fun moveBackward() = moveRobot(x = -STEP, y = 0.0, theta = 0.0)
-    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  0.5) // theta positivo rotazione antioraria
-    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = -0.5) // theta begativo rotazione oraria
+    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  STEP) // positivo antioraria
+    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = -STEP) // negativo oraria
 
     fun stopMovement() {
         CoroutineScope(Dispatchers.IO).launch {
@@ -72,12 +72,8 @@ class PepperMovementController {
     }
 
     // ── Movimento interno ────────────────────────────────
-
     private fun moveRobot(x: Double, y: Double, theta: Double) {
-        val ctx = qiContext ?: run {
-            Log.e(TAG, "QiContext null — robot non connesso")
-            return
-        }
+        val ctx = qiContext ?: return
 
         goToFuture?.requestCancellation()
 
@@ -90,20 +86,20 @@ class PepperMovementController {
                 val transform = TransformBuilder.create()
                     .from2DTransform(x, y, theta)
 
-                // timestamp in microsecondi, non 0L
-                val timestampUs = System.currentTimeMillis() * 1000L
-
                 val targetFrame = mapping.makeFreeFrame()
-                targetFrame.update(robotFrame, transform, timestampUs)
+
+                // ⚠ timestamp corretto (millisecondi, NON microsecondi)
+                val timestamp = System.currentTimeMillis()
+                targetFrame.update(robotFrame, transform, timestamp)
 
                 val goTo = GoToBuilder.with(ctx)
                     .withFrame(targetFrame.frame())
-                    .withFinalOrientationPolicy(OrientationPolicy.FREE_ORIENTATION) //non richiede mappa
-                    .withMaxSpeed(0.35F)
-                    //rimosso PathPlanningPolicy.STRAIGHT_LINES_ONLY — richiede mappa
+                    .withMaxSpeed(0.3f)
+                    .withFinalOrientationPolicy(OrientationPolicy.FREE_ORIENTATION)
                     .build()
 
                 goToFuture = goTo.async().run()
+
                 goToFuture?.thenConsume { future ->
                     when {
                         future.isSuccess  -> Log.i(TAG, "Movimento completato.")
@@ -117,7 +113,6 @@ class PepperMovementController {
             }
         }
     }
-
     // ── Holder rotazione autonoma ────────────────────────
 
     private fun holdBaseRotation() {
