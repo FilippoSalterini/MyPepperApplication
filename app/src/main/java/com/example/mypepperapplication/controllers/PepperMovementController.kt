@@ -33,9 +33,6 @@ class PepperMovementController {
 
     private var qiContext: QiContext? = null //passpartuout per tutto cio che riguarda il robot
     private var goToFuture: Future<Void>? = null //sta a rappresentare il movimento in corso.
-    // è un FUTURE VOID un oggetto che rappresenta un'operazione asincrona che non ritorna nessun valore (Void).
-    // Lo teniamo salvato perché ci serve per cancellarlo con stopMovement().
-    // Senza questo riferimento non potresti mai fermare Pepper a metà movimento.
     private var holder: Holder? = null //blocca rotazione autonoma di pepper
     private val STEP = 0.9
     // ── Lifecycle ────────────────────────────────────────
