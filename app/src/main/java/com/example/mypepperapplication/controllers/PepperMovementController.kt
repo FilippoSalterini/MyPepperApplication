@@ -37,11 +37,8 @@ class PepperMovementController {
     // Lo teniamo salvato perché ci serve per cancellarlo con stopMovement().
     // Senza questo riferimento non potresti mai fermare Pepper a metà movimento.
     private var holder: Holder? = null //blocca rotazione autonoma di pepper
-
     private val STEP = 0.9
-
     // ── Lifecycle ────────────────────────────────────────
-
     fun onRobotReady(qiContext: QiContext) {
         this.qiContext = qiContext
         holdBaseRotation()
@@ -51,14 +48,11 @@ class PepperMovementController {
         releaseBaseRotation()
         qiContext = null
     }
-
     // ── Bottoni ──────────────────────────────────────────
-
     fun moveForward()  = moveRobot(x =  STEP, y = 0.0, theta = 0.0)
     fun moveBackward() = moveRobot(x = -STEP, y = 0.0, theta = 0.0)
     fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  STEP) // positivo antioraria
     fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = -STEP) // negativo oraria
-
     fun stopMovement() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -70,15 +64,17 @@ class PepperMovementController {
             }
         }
     }
-
     // ── Movimento interno ────────────────────────────────
     private fun moveRobot(x: Double, y: Double, theta: Double) {
-        val ctx = qiContext ?: return
-
+        val ctx = qiContext ?: run {
+            Log.e(TAG, "qiContext è NULL, impossibile muoversi") // ← aggiungi
+            return
+        }
         goToFuture?.requestCancellation()
-
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                Log.i(TAG, "Inizio movimento x=$x y=$y theta=$theta") // ← aggiungi
+
                 val actuation  = ctx.actuation
                 val mapping    = ctx.mapping
                 val robotFrame = actuation.robotFrame()
@@ -87,17 +83,16 @@ class PepperMovementController {
                     .from2DTransform(x, y, theta)
 
                 val targetFrame = mapping.makeFreeFrame()
-
-                // ⚠ timestamp corretto (millisecondi, NON microsecondi)
-                val timestamp = System.currentTimeMillis()
-                targetFrame.update(robotFrame, transform, timestamp)
+                targetFrame.update(robotFrame, transform, 0L) // ← 0L
 
                 val goTo = GoToBuilder.with(ctx)
                     .withFrame(targetFrame.frame())
                     .withMaxSpeed(0.3f)
-                    .withFinalOrientationPolicy(OrientationPolicy.FREE_ORIENTATION)
+                    .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                    .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
                     .build()
 
+                Log.i(TAG, "GoTo costruito, avvio...") // ← aggiungi
                 goToFuture = goTo.async().run()
 
                 goToFuture?.thenConsume { future ->
@@ -109,11 +104,10 @@ class PepperMovementController {
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Errore movimento: ${e.message}", e)
+                Log.e(TAG, "Errore movimento: ${e.message}", e) // già presente
             }
         }
-    }
-    // ── Holder rotazione autonoma ────────────────────────
+    }    // ── Holder rotazione autonoma ────────────────────────
     private fun holdBaseRotation() {
         val ctx = qiContext ?: return
         try {
@@ -128,7 +122,6 @@ class PepperMovementController {
             Log.e(TAG, "Errore hold: ${e.message}")
         }
     }
-
     private fun releaseBaseRotation() {
         try {
             holder?.async()?.release()
