@@ -114,7 +114,6 @@ class PepperMovementController {
         }
     }
     // ── Holder rotazione autonoma ────────────────────────
-
     private fun holdBaseRotation() {
         val ctx = qiContext ?: return
         try {
