@@ -1,6 +1,5 @@
 package com.example.mypepperapplication.controllers
 
-// Android
 import android.util.Log
 // QiSDK core
 import com.aldebaran.qi.Future
@@ -48,8 +47,8 @@ class PepperMovementController {
     // ── Bottoni ──────────────────────────────────────────
     fun moveForward()  = moveRobot(x =  STEP, y = 0.0, theta = 0.0)
     fun moveBackward() = moveRobot(x = -STEP, y = 0.0, theta = 0.0)
-    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  STEP) // positivo antioraria
-    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = -STEP) // negativo oraria
+    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  -STEP)
+    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = STEP)
     fun stopMovement() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -64,13 +63,13 @@ class PepperMovementController {
     // ── Movimento interno ────────────────────────────────
     private fun moveRobot(x: Double, y: Double, theta: Double) {
         val ctx = qiContext ?: run {
-            Log.e(TAG, "qiContext è NULL, impossibile muoversi") // ← aggiungi
+            Log.e(TAG, "qiContext è NULL, impossibile muoversi")
             return
         }
         goToFuture?.requestCancellation()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.i(TAG, "Inizio movimento x=$x y=$y theta=$theta") // ← aggiungi
+                Log.i(TAG, "Inizio movimento x=$x y=$y theta=$theta")
 
                 val actuation  = ctx.actuation
                 val mapping    = ctx.mapping
@@ -80,16 +79,32 @@ class PepperMovementController {
                     .from2DTransform(x, y, theta)
 
                 val targetFrame = mapping.makeFreeFrame()
-                targetFrame.update(robotFrame, transform, 0L) // ← 0L
+                targetFrame.update(robotFrame, transform, 0L)
+                val goTo = when {
+                    x > 0 -> {  // forward
+                        GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.3f)
+                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                            .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
+                            .build()
+                    }
+                    x < 0 -> {
+                        GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.3f)
+                            .build()
+                    }
+                    else -> {  // rotazioni pure: serve ALIGN_X per far ruotare fisicamente
+                        GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.3f)
+                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                            .build()
+                    }
+                }
 
-                val goTo = GoToBuilder.with(ctx)
-                    .withFrame(targetFrame.frame())
-                    .withMaxSpeed(0.3f)
-                    .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-                    .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
-                    .build()
-
-                Log.i(TAG, "GoTo costruito, avvio...") // ← aggiungi
+                Log.i(TAG, "GoTo costruito, avvio...")
                 goToFuture = goTo.async().run()
 
                 goToFuture?.thenConsume { future ->
@@ -101,10 +116,11 @@ class PepperMovementController {
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Errore movimento: ${e.message}", e) // già presente
+                Log.e(TAG, "Errore movimento: ${e.message}", e)
             }
         }
-    }    // ── Holder rotazione autonoma ────────────────────────
+    }
+    // ── Holder rotazione autonoma ────────────────────────
     private fun holdBaseRotation() {
         val ctx = qiContext ?: return
         try {

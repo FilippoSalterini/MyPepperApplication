@@ -28,8 +28,8 @@
             android:id="@+id/btnForward"
             android:layout_width="120dp"
             android:layout_height="120dp"
-            android:text="▲"
-            android:textSize="24sp"
+            android:text="FORWARD"
+            android:textSize="18sp"
             android:layout_marginBottom="16dp"/>
 
         <!-- CENTRO -->
@@ -43,7 +43,7 @@
                 android:id="@+id/btnLeft"
                 android:layout_width="100dp"
                 android:layout_height="100dp"
-                android:text="◀"
+                android:text="ROTATE LEFT"
                 android:textSize="20sp"
                 android:layout_marginEnd="16dp"/>
 
@@ -60,7 +60,7 @@
                 android:id="@+id/btnRight"
                 android:layout_width="100dp"
                 android:layout_height="100dp"
-                android:text="▶"
+                android:text="ROTATE RIGHT"
                 android:textSize="20sp"
                 android:layout_marginStart="16dp"/>
         </LinearLayout>
@@ -70,8 +70,8 @@
             android:id="@+id/btnBackward"
             android:layout_width="120dp"
             android:layout_height="120dp"
-            android:text="▼"
-            android:textSize="24sp"
+            android:text="BACKWARD"
+            android:textSize="16sp"
             android:layout_marginTop="16dp"/>
     </LinearLayout>
 
