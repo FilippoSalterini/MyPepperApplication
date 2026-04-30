@@ -15,7 +15,8 @@
         android:text="@string/pepper_controller"
         android:textSize="50sp"
         android:textStyle="bold" />
-    <!-- WARNING -->
+
+    <!-- Message -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -27,6 +28,7 @@
         android:textStyle="bold"
         android:background="#FFF3CD"
         android:textColor="#856404"/>
+
     <!-- Controller -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -34,14 +36,16 @@
         android:layout_weight="1"
         android:orientation="vertical"
         android:gravity="center">
+
         <!-- AVANTI -->
         <Button
             android:id="@+id/btnForward"
             android:layout_width="150dp"
             android:layout_height="150dp"
+            android:layout_marginBottom="16dp"
             android:text="@string/forward"
-            android:textSize="20sp"
-            android:layout_marginBottom="16dp"/>
+            android:textSize="20sp" />
+
         <!-- CENTRO -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -53,9 +57,9 @@
                 android:id="@+id/btnLeft"
                 android:layout_width="130dp"
                 android:layout_height="125dp"
+                android:layout_marginEnd="16dp"
                 android:text="@string/rotate_left"
-                android:textSize="20sp"
-                android:layout_marginEnd="16dp" />
+                android:textSize="20sp" />
 
             <Button
                 android:id="@+id/btnStop"
@@ -65,22 +69,25 @@
                 android:textSize="16sp"
                 android:backgroundTint="#F44336"
                 android:textColor="#FFFFFF" />
+
             <Button
                 android:id="@+id/btnRight"
                 android:layout_width="130dp"
                 android:layout_height="125dp"
+                android:layout_marginStart="16dp"
                 android:text="@string/rotate_right"
-                android:textSize="20sp"
-                android:layout_marginStart="16dp"/>
+                android:textSize="20sp" />
         </LinearLayout>
+
         <!-- BACKWARD -->
         <Button
             android:id="@+id/btnBackward"
             android:layout_width="150dp"
             android:layout_height="150dp"
+            android:layout_marginTop="16dp"
             android:text="@string/backward"
-            android:textSize="20sp"
-            android:layout_marginTop="16dp"/>
+            android:textSize="20sp" />
+
     </LinearLayout>
 
 </LinearLayout>
