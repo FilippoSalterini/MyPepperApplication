@@ -5,16 +5,11 @@ import android.util.Log
 import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
 // QiSDK - actuation
-import com.aldebaran.qi.sdk.`object`.actuation.Actuation
-import com.aldebaran.qi.sdk.`object`.actuation.Frame
-import com.aldebaran.qi.sdk.`object`.actuation.FreeFrame
-import com.aldebaran.qi.sdk.`object`.actuation.Mapping
+
 import com.aldebaran.qi.sdk.`object`.actuation.OrientationPolicy
 import com.aldebaran.qi.sdk.`object`.actuation.PathPlanningPolicy
 // QiSDK - autonomous abilities
 import com.aldebaran.qi.sdk.`object`.autonomousabilities.DegreeOfFreedom
-// QiSDK - geometry
-import com.aldebaran.qi.sdk.`object`.geometry.Transform
 // QiSDK - holder
 import com.aldebaran.qi.sdk.`object`.holder.Holder
 // QiSDK - builders
@@ -30,10 +25,10 @@ private const val TAG = "PepperMovement"
 
 class PepperMovementController {
 
-    private var qiContext: QiContext? = null //passpartuout per tutto cio che riguarda il robot
-    private var goToFuture: Future<Void>? = null //sta a rappresentare il movimento in corso.
-    private var holder: Holder? = null //blocca rotazione autonoma di pepper
-    private val STEP = 0.9
+    private var qiContext: QiContext? = null //master key for everything related to the robot
+    private var goToFuture: Future<Void>? = null //it represents the movement in progress
+    private var holder: Holder? = null //lock autonomous rotation of Pepper
+    private val step = 1.0
     // ── Lifecycle ────────────────────────────────────────
     fun onRobotReady(qiContext: QiContext) {
         this.qiContext = qiContext
@@ -44,32 +39,32 @@ class PepperMovementController {
         releaseBaseRotation()
         qiContext = null
     }
-    // ── Bottoni ──────────────────────────────────────────
-    fun moveForward()  = moveRobot(x =  STEP, y = 0.0, theta = 0.0)
-    fun moveBackward() = moveRobot(x = -STEP, y = 0.0, theta = 0.0)
-    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  -STEP)
-    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = STEP)
+    // ── Buttons ──────────────────────────────────────────
+    fun moveForward()  = moveRobot(x =  step, y = 0.0, theta = 0.0)
+    fun moveBackward() = moveRobot(x = -step, y = 0.0, theta = 0.0)
+    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  -step)
+    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = step)
     fun stopMovement() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 goToFuture?.requestCancellation()
                 goToFuture = null
-                Log.i(TAG, "Movimento fermato.")
+                Log.i(TAG, "Movement stopped.")
             } catch (e: Exception) {
-                Log.e(TAG, "Errore stop: ${e.message}")
+                Log.e(TAG, "Error stop: ${e.message}")
             }
         }
     }
-    // ── Movimento interno ────────────────────────────────
+    // ── Internal Movement ────────────────────────────────
     private fun moveRobot(x: Double, y: Double, theta: Double) {
         val ctx = qiContext ?: run {
-            Log.e(TAG, "qiContext è NULL, impossibile muoversi")
+            Log.e(TAG, "qiContext is NULL, impossibility to move")
             return
         }
         goToFuture?.requestCancellation()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.i(TAG, "Inizio movimento x=$x y=$y theta=$theta")
+                Log.i(TAG, "Starting movement x=$x y=$y theta=$theta")
 
                 val actuation  = ctx.actuation
                 val mapping    = ctx.mapping
@@ -95,7 +90,7 @@ class PepperMovementController {
                             .withMaxSpeed(0.3f)
                             .build()
                     }
-                    else -> {  // rotazioni pure: serve ALIGN_X per far ruotare fisicamente
+                    else -> {  // rotation pure: need ALIGN_X to be physically rotated
                         GoToBuilder.with(ctx)
                             .withFrame(targetFrame.frame())
                             .withMaxSpeed(0.3f)
@@ -104,23 +99,23 @@ class PepperMovementController {
                     }
                 }
 
-                Log.i(TAG, "GoTo costruito, avvio...")
+                Log.i(TAG, "GoTo built, starting...")
                 goToFuture = goTo.async().run()
 
                 goToFuture?.thenConsume { future ->
                     when {
-                        future.isSuccess  -> Log.i(TAG, "Movimento completato.")
-                        future.hasError() -> Log.e(TAG, "Errore GoTo: ${future.error}")
-                        else              -> Log.d(TAG, "Movimento cancellato.")
+                        future.isSuccess  -> Log.i(TAG, "Movement completed.")
+                        future.hasError() -> Log.e(TAG, "Error GoTo: ${future.error}")
+                        else              -> Log.d(TAG, "Movement deleted.")
                     }
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Errore movimento: ${e.message}", e)
+                Log.e(TAG, "Error movement: ${e.message}", e)
             }
         }
     }
-    // ── Holder rotazione autonoma ────────────────────────
+    // ── Holder autonomous rotation ────────────────────────
     private fun holdBaseRotation() {
         val ctx = qiContext ?: return
         try {
@@ -130,18 +125,18 @@ class PepperMovementController {
                     .build()
             }
             holder?.async()?.hold()
-            Log.d(TAG, "Rotazione autonoma bloccata.")
+            Log.d(TAG, "Autonomous rotation blocked.")
         } catch (e: Exception) {
-            Log.e(TAG, "Errore hold: ${e.message}")
+            Log.e(TAG, "Error hold: ${e.message}")
         }
     }
     private fun releaseBaseRotation() {
         try {
             holder?.async()?.release()
             holder = null
-            Log.d(TAG, "Rotazione autonoma rilasciata.")
+            Log.d(TAG, "Autonomous rotation released.")
         } catch (e: Exception) {
-            Log.e(TAG, "Errore release: ${e.message}")
+            Log.e(TAG, "Error release: ${e.message}")
         }
     }
 }

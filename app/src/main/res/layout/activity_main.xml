@@ -12,9 +12,19 @@
         android:layout_height="94dp"
         android:layout_marginBottom="8dp"
         android:gravity="center"
-        android:text="Pepper Controller"
-        android:textSize="50dp"
+        android:text="@string/pepper_controller"
+        android:textSize="50sp"
         android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="46dp"
+        android:layout_marginBottom="8dp"
+        android:gravity="center"
+        android:text="@string/if_the_controls_do_not_respond_exit_the_app_and_re_enter"
+        android:textSize="25sp"
+        android:textStyle="bold" />
+
     <!-- Controller -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -26,10 +36,10 @@
         <!-- AVANTI -->
         <Button
             android:id="@+id/btnForward"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:text="FORWARD"
-            android:textSize="18sp"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:text="@string/forward"
+            android:textSize="20sp"
             android:layout_marginBottom="16dp"/>
 
         <!-- CENTRO -->
@@ -41,26 +51,26 @@
 
             <Button
                 android:id="@+id/btnLeft"
-                android:layout_width="100dp"
-                android:layout_height="100dp"
-                android:text="ROTATE LEFT"
+                android:layout_width="130dp"
+                android:layout_height="125dp"
+                android:text="@string/rotate_left"
                 android:textSize="20sp"
-                android:layout_marginEnd="16dp"/>
+                android:layout_marginEnd="16dp" />
 
             <Button
                 android:id="@+id/btnStop"
-                android:layout_width="100dp"
-                android:layout_height="100dp"
-                android:text="STOP"
+                android:layout_width="150dp"
+                android:layout_height="150dp"
+                android:text="@string/stop"
                 android:textSize="16sp"
                 android:backgroundTint="#F44336"
-                android:textColor="#FFFFFF"/>
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnRight"
-                android:layout_width="100dp"
-                android:layout_height="100dp"
-                android:text="ROTATE RIGHT"
+                android:layout_width="130dp"
+                android:layout_height="125dp"
+                android:text="@string/rotate_right"
                 android:textSize="20sp"
                 android:layout_marginStart="16dp"/>
         </LinearLayout>
@@ -68,10 +78,10 @@
         <!-- INDIETRO -->
         <Button
             android:id="@+id/btnBackward"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:text="BACKWARD"
-            android:textSize="16sp"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:text="@string/backward"
+            android:textSize="20sp"
             android:layout_marginTop="16dp"/>
     </LinearLayout>
 

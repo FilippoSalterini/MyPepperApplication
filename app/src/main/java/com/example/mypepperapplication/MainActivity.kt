@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
         QiSDK.register(this, this)
 
-        Log.d("MainActivity", "QiSDK.register chiamato")
+        Log.d("MainActivity", "QiSDK.register called")
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setupButtons()

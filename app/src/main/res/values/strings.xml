@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">My Pepper Application</string>
+    <string name="forward">FORWARD</string>
+    <string name="pepper_controller">Pepper Controller</string>
+    <string name="if_the_controls_do_not_respond_exit_the_app_and_re_enter">If the controls do not respond, exit the app and re-enter</string>
+    <string name="rotate_left">ROTATE LEFT</string>
+    <string name="stop">STOP</string>
+    <string name="rotate_right">ROTATE RIGHT</string>
+    <string name="backward">BACKWARD</string>
 </resources>
