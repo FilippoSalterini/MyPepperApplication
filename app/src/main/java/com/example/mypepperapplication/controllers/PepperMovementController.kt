@@ -55,6 +55,23 @@ class PepperMovementController {
             }
         }
     }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH per PepperMovementController.kt
+// Servono al VisualServoingController per generare comandi di bassa granularità.
+// ─────────────────────────────────────────────────────────────────────────────
+    /**
+     * Ruota di [angleRad] radianti rispetto alla posizione corrente.
+     * Positivo = antiorario (sinistra), Negativo = orario (destra).
+     * Usato dal visual servoing per centrare il target.
+     */
+    fun rotateByAngle(angleRad: Double) = moveRobot(x = 0.0, y = 0.0, theta = angleRad)
+    /**
+     * Avanza di [distanceMeters] metri (negativo = indietro).
+     * Usato dal visual servoing per raggiungere la distanza target.
+     */
+    fun moveByDistance(distanceMeters: Double) = moveRobot(x = distanceMeters, y = 0.0, theta = 0.0)
+
     // ── Internal Movement ────────────────────────────────
     private fun moveRobot(x: Double, y: Double, theta: Double) {
         val ctx = qiContext ?: run {
