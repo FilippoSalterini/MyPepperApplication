@@ -29,7 +29,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     private val detectionController = ObjectDetectionController().apply {
         // ⚠️ IMPORTANTE: sostituisci con l'IP del tuo PC sulla LAN WiFi
         // Trovi l'IP su Windows con: ipconfig → "Indirizzo IPv4"
-        serverUrl = "http://192.168.1.100:8000"
+        serverUrl = "http://10.186.13.27:8000"
 
         // Fallback mock se il server non risponde (utile per test senza PC)
         useMockFallback = true
@@ -133,12 +133,12 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
             if (binding.controllerContainer.visibility == View.GONE) {
 
                 binding.controllerContainer.visibility = View.VISIBLE
-                binding.btnToggleControls.text = "Hide Controller"
+                binding.btnToggleControls.text = "Close Controller"
 
             } else {
 
                 binding.controllerContainer.visibility = View.GONE
-                binding.btnToggleControls.text = "Show Controller"
+                binding.btnToggleControls.text = "Open Controller"
             }
         }
     }

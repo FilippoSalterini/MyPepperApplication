@@ -61,9 +61,9 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
     // TFLite per YOLO locale (opzionale)
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    // implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    // implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    // implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 
 //    implementation("com.google.code.gson:gson:2.10.1")
     testImplementation(libs.junit)

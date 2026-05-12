@@ -68,7 +68,7 @@ class ObjectDetectionController {
     // ── Config ────────────────────────────────────────────────────────────────
 
     /** URL del server Python sul PC. Modifica con l'IP del tuo PC sulla LAN. */
-    var serverUrl: String = "http://192.168.1.100:8000"
+    var serverUrl: String = "http://10.186.13.27:8000"
 
     /** Qualità JPEG per il trasferimento (70 = buon bilanciamento qualità/velocità). */
     var jpegQuality: Int = 70
