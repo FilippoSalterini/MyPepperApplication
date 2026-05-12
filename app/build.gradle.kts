@@ -6,7 +6,9 @@ plugins {
 android {
     namespace = "com.example.mypepperapplication"
     compileSdk = 35
-
+    androidResources {
+        noCompress += "tflite"
+    }
     defaultConfig {
         applicationId = "com.example.mypepperapplication"
         minSdk = 23

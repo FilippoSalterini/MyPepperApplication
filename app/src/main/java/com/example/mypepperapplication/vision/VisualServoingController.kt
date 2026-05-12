@@ -5,6 +5,7 @@ import com.aldebaran.qi.sdk.QiContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -12,68 +13,79 @@ import kotlin.math.sign
 import com.example.mypepperapplication.controllers.PepperMovementController
 
 private const val TAG = "VisualServoing"
-class VisualServoingController {
-    private val movementController = PepperMovementController()
-    /**
-     * Visual Servoing per Pepper.
-     *
-     * Data una lista di [BoundingBox] dal rilevatore, questo controller:
-     *   1. Seleziona il target (per label o per confidenza massima).
-     *   2. Calcola l'errore rispetto al centro del frame.
-     *   3. Genera comandi di movimento (rotazione + avanzamento) per ridurre l'errore.
-     *
-     * Schema di controllo: Image-Based Visual Servoing (IBVS) semplificato.
-     *
-     *   errX = cx_target - 0.5   (negativo → target a sinistra, positivo → destra)
-     *   errY = cy_target - 0.5   (negativo → target in alto, positivo → in basso)
-     *   errArea = targetArea - currentArea  (negativo → troppo lontano)
-     *
-     * Azioni:
-     *   - errX > deadzone  → ruota a destra
-     *   - errX < -deadzone → ruota a sinistra
-     *   - errArea < -areaThreshold → avanza
-     *   - errArea >  areaThreshold → indietreggia (opzionale)
-     *
-     * Integrazione con il progetto esistente:
-     *   Chiamare [startTracking] passando il label da seguire (es. "person").
-     *   Il controller legge i frame da [PepperCameraController] e le detections
-     *   da [ObjectDetectionController] tramite callback.
-     */
+
+/**
+ * VisualServoingController — Image-Based Visual Servoing (IBVS) semplificato.
+ *
+ * Architettura corretta (PC-side inference):
+ *
+ *   Pepper Camera → JPEG → PC YOLOv8 → BoundingBox → [questo controller] → PepperMovement
+ *
+ * Il loop di controllo gira su Pepper (coroutine IO), ma:
+ *   - L'inferenza AI è già avvenuta sul PC
+ *   - Questo controller riceve solo bbox già pronte
+ *   - Calcola errori e comanda il movimento
+ *
+ * Schema controllo P (proporzionale):
+ *
+ *   errX    = cx_target - 0.5   → [-0.5, +0.5]  negativo = sinistra
+ *   errArea = targetArea - boxArea              negativo = troppo lontano
+ *
+ * Decisione:
+ *   |errX| > horizontalDeadzone  → ruota verso il target
+ *   |errArea| > areaDeadzone     → avanza / arretra
+ *   entrambi sotto soglia        → target centrato, fermo
+
+ */
+class VisualServoingController(
+    private val movementController: PepperMovementController
+) {
+
     // ── Stato ─────────────────────────────────────────────────────────────────
 
-    private var qiContext: QiContext? = null
     private var trackingJob: Job? = null
 
-    /** Label da inseguire (es. "person", "chair"). Null = target con score più alto. */
+    // ── Parametri controllo ───────────────────────────────────────────────────
+
+    /** Label da inseguire. Null = score più alto tra tutte le detections. */
     var targetLabel: String? = "person"
 
-    /** Metà della dead-zone orizzontale (0..0.5). Sotto questa soglia non ruota. */
+    /** Dead-zone orizzontale: sotto questa soglia non ruota. Range [0, 0.5]. */
     var horizontalDeadzone: Float = 0.08f
 
-    /** Area target normalizzata desiderata [0,1]. Il robot avanza finché l'area è minore. */
+    /** Area normalizzata desiderata nel frame. Il robot avanza finché è minore. */
     var targetArea: Float = 0.15f
 
-    /** Soglia di errore area sotto cui non avanza. */
+    /** Soglia area: sotto questa differenza non avanza. */
     var areaDeadzone: Float = 0.03f
 
-    /** Passo di rotazione in radianti per ogni correzione. */
-    var rotationStep: Float = 0.25f
+    /** Angolo di rotazione per step (radianti). Riduci se il robot oscilla. */
+    var rotationStep: Float = 0.20f
 
-    /** Passo di avanzamento in metri per ogni correzione. */
-    var advanceStep: Float = 0.3f
+    /** Distanza avanzamento per step (metri). */
+    var advanceStep: Float = 0.25f
 
-    /** Massimi tentativi consecutivi senza target prima di fermarsi. */
+    /** Frame consecutivi senza target prima di fermarsi. */
     var maxMissedFrames: Int = 5
+
+    /**
+     * Intervallo minimo tra un ciclo detect e il successivo (ms).
+     * YOLOv8n su CPU Intel UHD ≈ 300-600ms → usa 500ms come default sicuro.
+     * Abbassa a 300ms se la tua LAN è veloce e il PC risponde bene.
+     */
+    var loopIntervalMs: Long = 500L
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     fun onRobotReady(ctx: QiContext) {
-        qiContext = ctx
+        movementController.onRobotReady(ctx)
+        Log.d(TAG, "Robot ready, movement controller initialized.")
     }
 
     fun onRobotLost() {
         stopTracking()
-        qiContext = null
+        movementController.onRobotLost()
+        Log.d(TAG, "Robot lost.")
     }
 
     // ── API pubblica ──────────────────────────────────────────────────────────
@@ -81,9 +93,9 @@ class VisualServoingController {
     /**
      * Avvia il loop di visual servoing.
      *
-     * @param cameraController   sorgente frame
-     * @param detectionController  rilevatore bounding box
-     * @param label              label da seguire (sovrascrive [targetLabel])
+     * @param cameraController    sorgente frame da Pepper
+     * @param detectionController invia frame al PC e riceve bbox
+     * @param label               label da seguire (default: "person")
      */
     fun startTracking(
         cameraController: PepperCameraController,
@@ -91,113 +103,125 @@ class VisualServoingController {
         label: String = targetLabel ?: "person"
     ) {
         targetLabel = label
-        if (trackingJob?.isActive == true) stopTracking()
+        stopTracking()
 
-        Log.i(TAG, "Visual servoing started. Target: '$label'")
+        Log.i(TAG, "Visual servoing started. Target='$label' interval=${loopIntervalMs}ms")
+
         trackingJob = CoroutineScope(Dispatchers.IO).launch {
             var missedFrames = 0
 
-            cameraController.startContinuousCapture { bitmap, _ ->
-                if (!isActive) return@startContinuousCapture
+            while (isActive) {
+                val loopStart = System.currentTimeMillis()
 
-                detectionController.detect(bitmap) { boxes, imageW, imageH ->
-                    val target = selectTarget(boxes, label)
+                // 1. Cattura frame da Pepper (snapshot singolo per ciclo)
+                var frameCaptured = false
+                cameraController.takeSinglePicture { bitmap, _ ->
+                    if (!isActive) return@takeSinglePicture
+                    frameCaptured = true
 
-                    if (target == null) {
-                        missedFrames++
-                        Log.d(TAG, "Target '$label' not found ($missedFrames/$maxMissedFrames)")
-                        if (missedFrames >= maxMissedFrames) {
-                            Log.w(TAG, "Target lost, stopping movement.")
-                            movementController.stopMovement()
+                    // 2. Invia al PC per detection
+                    detectionController.detect(bitmap) { boxes, _, _ ->
+                        val target = selectTarget(boxes, label)
+
+                        if (target == null) {
+                            missedFrames++
+                            Log.d(TAG, "Target '$label' not found ($missedFrames/$maxMissedFrames)")
+                            if (missedFrames >= maxMissedFrames) {
+                                Log.w(TAG, "Target lost — stopping movement.")
+                                movementController.stopMovement()
+                            }
+                            return@detect
                         }
-                        return@detect
-                    }
 
-                    missedFrames = 0
-                    applyControl(target)
+                        missedFrames = 0
+                        Log.d(TAG, debugInfo(listOf(target)))
+                        applyControl(target)
+                    }
                 }
+
+                // 3. Rispetta l'intervallo minimo tra cicli
+                val elapsed = System.currentTimeMillis() - loopStart
+                val remaining = loopIntervalMs - elapsed
+                if (remaining > 0) delay(remaining)
             }
         }
     }
 
     fun stopTracking() {
-        trackingJob?.cancel()
+        if (trackingJob?.isActive == true) {
+            trackingJob?.cancel()
+            movementController.stopMovement()
+            Log.i(TAG, "Visual servoing stopped.")
+        }
         trackingJob = null
-        movementController.stopMovement()
-        Log.i(TAG, "Visual servoing stopped.")
     }
 
-    // ── Controllo ─────────────────────────────────────────────────────────────
+    val isTracking: Boolean get() = trackingJob?.isActive == true
+
+    // ── Selezione target ──────────────────────────────────────────────────────
 
     /**
-     * Seleziona il box target dalla lista delle detections.
-     * Priorità: label corrispondente → score massimo.
+     * Seleziona il box target:
+     *   1. Cerca per label corrispondente → prende quello con score più alto
+     *   2. Se nessuno corrisponde → prende il box con score più alto in assoluto
      */
     private fun selectTarget(boxes: List<BoundingBox>, label: String): BoundingBox? {
-        val candidates = boxes.filter { it.label.equals(label, ignoreCase = true) }
-        return if (candidates.isNotEmpty()) {
-            candidates.maxByOrNull { it.score }
-        } else {
-            boxes.maxByOrNull { it.score }
-        }
+        if (boxes.isEmpty()) return null
+        val byLabel = boxes.filter { it.label.equals(label, ignoreCase = true) }
+        return byLabel.maxByOrNull { it.score } ?: boxes.maxByOrNull { it.score }
     }
 
+    // ── Controllo proporzionale P ─────────────────────────────────────────────
+
     /**
-     * Applica il controllo proporzionale P.
+     * Applica controllo proporzionale:
      *
-     *   errX  ∈ [-0.5, +0.5]  → rotazione
-     *   errArea ∈ [-1, +1]    → avanzamento/retrocessione
+     *   Priorità 1: centra orizzontalmente (rotazione)
+     *   Priorità 2: raggiungi la distanza target (avanzamento)
+     *
+     * La separazione delle priorità evita movimenti diagonali instabili.
      */
     private fun applyControl(target: BoundingBox) {
-        val errX = target.cx - 0.5f     // positivo = target a destra
+        val errX    = target.cx - 0.5f
         val boxArea = target.rect.width() * target.rect.height()
-        val errArea = targetArea - boxArea // positivo = troppo lontano
+        val errArea = targetArea - boxArea
 
         val needsRotation = abs(errX) > horizontalDeadzone
-        val needsAdvance = abs(errArea) > areaDeadzone
+        val needsAdvance  = abs(errArea) > areaDeadzone
 
-        Log.d(
-            TAG, "Control: errX=%.3f errArea=%.3f rot=$needsRotation adv=$needsAdvance"
-                .format(errX, errArea)
-        )
+        Log.d(TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
+            .format(errX, errArea))
 
         when {
-            // Prima centra orizzontalmente (priorità alta)
             needsRotation -> {
-                val theta = -errX.sign * rotationStep  // negativo = ruota verso il target
-                Log.d(TAG, "Rotating theta=$theta (errX=$errX)")
+                // errX positivo = target a destra → ruota a destra (theta negativo in QiSDK)
+                val theta = -errX.sign * rotationStep
+                Log.d(TAG, "→ Rotate theta=%.2f rad".format(theta))
                 movementController.rotateByAngle(theta.toDouble())
             }
-
-            // Poi avanza/retrocedi per raggiungere la distanza target
             needsAdvance -> {
+                // errArea positivo = troppo lontano → avanza
                 val dist = errArea.sign * advanceStep
-                Log.d(TAG, "Advancing x=$dist (errArea=$errArea)")
+                Log.d(TAG, "→ Move dist=%.2f m".format(dist))
                 movementController.moveByDistance(dist.toDouble())
             }
-
             else -> {
-                Log.d(TAG, "Target centered and at correct distance. No movement needed.")
+                Log.d(TAG, "→ Target centrato e a distanza corretta.")
             }
         }
     }
 
-    // ── Dati diagnostici ─────────────────────────────────────────────────────
+    // ── Debug ─────────────────────────────────────────────────────────────────
 
-    /**
-     * Restituisce una stringa di debug con lo stato corrente del servoing.
-     */
     fun debugInfo(boxes: List<BoundingBox>): String {
-        val target = boxes.firstOrNull { it.label == targetLabel }
+        val target = boxes.firstOrNull { it.label.equals(targetLabel, ignoreCase = true) }
         return if (target != null) {
-            "Target '${target.label}' @ cx=%.2f cy=%.2f area=%.3f score=%.2f"
-                .format(
-                    target.cx, target.cy,
-                    target.rect.width() * target.rect.height(),
-                    target.score
-                )
+            val area = target.rect.width() * target.rect.height()
+            "[${target.source}] '${target.label}' " +
+                    "cx=%.2f cy=%.2f area=%.3f score=%.0f%%"
+                        .format(target.cx, target.cy, area, target.score * 100)
         } else {
-            "Target '${targetLabel}' NOT FOUND (${boxes.size} detections)"
+            "Target '$targetLabel' NOT FOUND in ${boxes.size} detections"
         }
     }
 }

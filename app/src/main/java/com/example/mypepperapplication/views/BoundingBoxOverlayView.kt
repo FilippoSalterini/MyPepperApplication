@@ -4,32 +4,28 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import com.example.mypepperapplication.vision.BoundingBox
 
 /**
- * View trasparente sovrapposta alla ImageView della camera.
- * Disegna le bounding boxes e le label di ogni detection.
+ * BoundingBoxOverlayView — disegna bounding boxes sopra la preview camera.
  *
- * Utilizzo nel layout XML:
+ * Le coordinate delle BoundingBox sono normalizzate [0,1] (prodotte dal server PC).
+ * Questo view le scala rispetto alle sue dimensioni effettive su schermo.
  *
- *   <FrameLayout
+ * FIX rispetto alla versione precedente:
+ *   Le coordinate NON dipendono dalla risoluzione Pepper (640×480).
+ *   Usano direttamente width/height del view → corretto su qualsiasi schermo.
+ *
+ * Usage in XML:
+ *   <com.example.mypepperapplication.views.BoundingBoxOverlayView
+ *       android:id="@+id/overlayView"
  *       android:layout_width="match_parent"
- *       android:layout_height="200dp">
+ *       android:layout_height="match_parent" />
  *
- *       <ImageView
- *           android:id="@+id/ivCameraPreview"
- *           android:layout_width="match_parent"
- *           android:layout_height="match_parent"
- *           android:scaleType="fitCenter" />
- *
- *       <com.example.mypepperapplication.views.BoundingBoxOverlayView
- *           android:id="@+id/overlayView"
- *           android:layout_width="match_parent"
- *           android:layout_height="match_parent"
- *           android:background="@android:color/transparent" />
- *   </FrameLayout>
+ * Sovrapponi questo view all'ImageView della preview con lo stesso size.
  */
 class BoundingBoxOverlayView @JvmOverloads constructor(
     context: Context,
@@ -39,8 +35,6 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     // ── Stato ─────────────────────────────────────────────────────────────────
 
     private var boxes: List<BoundingBox> = emptyList()
-    private var imageWidth: Int  = 1
-    private var imageHeight: Int = 1
 
     // ── Paint ─────────────────────────────────────────────────────────────────
 
@@ -50,45 +44,44 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
-    private val bgPaint = Paint().apply {
+    private val labelBgPaint = Paint().apply {
         style = Paint.Style.FILL
     }
 
-    private val textPaint = Paint().apply {
+    private val labelPaint = Paint().apply {
         color     = Color.WHITE
-        textSize  = 32f
+        textSize  = 36f
         isAntiAlias = true
+        isFakeBoldText = true
     }
 
-    // Palette colori per label diverse
-    private val palette = listOf(
-        Color.parseColor("#FF4444"),  // rosso
-        Color.parseColor("#44FF44"),  // verde
-        Color.parseColor("#4488FF"),  // blu
-        Color.parseColor("#FFAA00"),  // arancio
-        Color.parseColor("#FF44FF"),  // viola
-        Color.parseColor("#00FFFF"),  // ciano
+    // Colori per source
+    private val colorBySource = mapOf(
+        "remote_yolo" to Color.parseColor("#00E676"),  // verde brillante
+        "mock"        to Color.parseColor("#FF9100"),  // arancio
+        "unknown"     to Color.parseColor("#40C4FF")   // azzurro
     )
 
     // ── API pubblica ──────────────────────────────────────────────────────────
 
     /**
-     * Aggiorna le detections da disegnare.
-     * Thread-safe: chiama invalidate() sul main thread.
+     * Aggiorna le bounding boxes e ridisegna.
+     *
+     * @param boxes   Lista di BoundingBox con coordinate normalizzate [0,1]
+     * @param imgW    Larghezza frame originale (non usato, mantenuto per compatibilità)
+     * @param imgH    Altezza frame originale (non usato, mantenuto per compatibilità)
      */
-    fun update(newBoxes: List<BoundingBox>, imgW: Int, imgH: Int) {
-        boxes       = newBoxes
-        imageWidth  = imgW
-        imageHeight = imgH
-        postInvalidate()   // sicuro da thread background
+    fun update(boxes: List<BoundingBox>, imgW: Int = 0, imgH: Int = 0) {
+        this.boxes = boxes
+        invalidate()
     }
 
     fun clear() {
         boxes = emptyList()
-        postInvalidate()
+        invalidate()
     }
 
-    // ── Draw ──────────────────────────────────────────────────────────────────
+    // ── Disegno ───────────────────────────────────────────────────────────────
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -96,45 +89,47 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
 
         val vw = width.toFloat()
         val vh = height.toFloat()
+        if (vw == 0f || vh == 0f) return
 
-        // Calcola il rettangolo in cui la ImageView (fitCenter) mostra l'immagine
-        val imageAspect  = imageWidth.toFloat() / imageHeight
-        val viewAspect   = vw / vh
-        val (imgLeft, imgTop, imgRight, imgBottom) = if (imageAspect > viewAspect) {
-            // pillarbox (barre sopra/sotto)
-            val scaledH = vw / imageAspect
-            val margin  = (vh - scaledH) / 2f
-            listOf(0f, margin, vw, margin + scaledH)
-        } else {
-            // letterbox (barre sinistra/destra)
-            val scaledW = vh * imageAspect
-            val margin  = (vw - scaledW) / 2f
-            listOf(margin, 0f, margin + scaledW, vh)
-        }
-        val imgW = imgRight - imgLeft
-        val imgH = imgBottom - imgTop
+        for (box in boxes) {
+            // Scala coordinate normalizzate → pixel del view
+            val left   = box.rect.left   * vw
+            val top    = box.rect.top    * vh
+            val right  = box.rect.right  * vw
+            val bottom = box.rect.bottom * vh
+            val screenRect = RectF(left, top, right, bottom)
 
-        boxes.forEachIndexed { idx, box ->
-            val color = palette[idx % palette.size]
+            // Colore per source
+            val color = colorBySource[box.source] ?: colorBySource["unknown"]!!
             boxPaint.color = color
-            bgPaint.color  = color and 0x80FFFFFF.toInt() // 50% alpha
 
-            // Coordinate pixel nella View
-            val left   = imgLeft + box.rect.left   * imgW
-            val top    = imgTop  + box.rect.top    * imgH
-            val right  = imgLeft + box.rect.right  * imgW
-            val bottom = imgTop  + box.rect.bottom * imgH
+            // Disegna rettangolo
+            canvas.drawRoundRect(screenRect, 8f, 8f, boxPaint)
 
-            canvas.drawRect(left, top, right, bottom, boxPaint)
+            // Label: "person 92%"
+            val labelText = "${box.label} ${"%.0f".format(box.score * 100)}%"
+            val textWidth  = labelPaint.measureText(labelText)
+            val textHeight = labelPaint.textSize
 
-            // Label background
-            val label   = "${box.label} ${"%.0f".format(box.score * 100)}%"
-            val textW   = textPaint.measureText(label)
-            val textH   = textPaint.textSize
-            val labelTop = if (top > textH + 4) top - textH - 4 else bottom
+            val labelLeft   = left
+            val labelTop    = (top - textHeight - 8f).coerceAtLeast(0f)
+            val labelRight  = left + textWidth + 16f
+            val labelBottom = labelTop + textHeight + 8f
 
-            canvas.drawRect(left, labelTop, left + textW + 8, labelTop + textH + 4, bgPaint)
-            canvas.drawText(label, left + 4, labelTop + textH, textPaint)
+            // Sfondo label
+            labelBgPaint.color = color
+            canvas.drawRoundRect(
+                RectF(labelLeft, labelTop, labelRight, labelBottom),
+                4f, 4f, labelBgPaint
+            )
+
+            // Testo label
+            canvas.drawText(
+                labelText,
+                labelLeft + 8f,
+                labelBottom - 8f,
+                labelPaint
+            )
         }
     }
 }

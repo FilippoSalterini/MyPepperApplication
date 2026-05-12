@@ -9,10 +9,10 @@ import androidx.appcompat.app.AppCompatActivity
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.QiSDK
 import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
+import com.example.mypepperapplication.controllers.PepperMovementController
 import com.example.mypepperapplication.vision.BoundingBox
 import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
-import com.example.mypepperapplication.controllers.PepperMovementController
 import com.example.mypepperapplication.vision.VisualServoingController
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 
@@ -22,13 +22,24 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     private lateinit var binding: ActivityMainBinding
 
     // ── Controllers ───────────────────────────────────────────────────────────
-    private val movementController   = PepperMovementController()
-    private val cameraController     = PepperCameraController()
-    private val detectionController  by lazy { ObjectDetectionController(this) }
-    private val servoingController   = VisualServoingController()
-//    private val servoingController   = VisualServoingController(movementController)
+
+    // movementController è condiviso con VisualServoingController
+    private val movementController  = PepperMovementController()
+    private val cameraController    = PepperCameraController()
+    private val detectionController = ObjectDetectionController().apply {
+        // ⚠️ IMPORTANTE: sostituisci con l'IP del tuo PC sulla LAN WiFi
+        // Trovi l'IP su Windows con: ipconfig → "Indirizzo IPv4"
+        serverUrl = "http://192.168.1.100:8000"
+
+        // Fallback mock se il server non risponde (utile per test senza PC)
+        useMockFallback = true
+    }
+
+    // VisualServoingController riceve movementController dall'esterno (fix architetturale)
+    private val servoingController = VisualServoingController(movementController)
 
     // ── Stato UI ──────────────────────────────────────────────────────────────
+
     private var isServoingActive = false
 
     // ── Lifecycle Android ─────────────────────────────────────────────────────
@@ -39,18 +50,15 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        setupControllerToggle()
         setupMovementButtons()
         setupVisionButtons()
-
-        // Configura GPT Vision (opzionale – commenta se usi solo YOLO)
-        // detectionController.openAiApiKey = BuildConfig.OPENAI_API_KEY
-        // detectionController.useGptFallback = true
     }
 
     override fun onDestroy() {
-        QiSDK.unregister(this, this)
         servoingController.stopTracking()
         cameraController.stopContinuousCapture()
+        QiSDK.unregister(this, this)
         super.onDestroy()
     }
 
@@ -59,9 +67,11 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     override fun onRobotFocusGained(qiContext: QiContext) {
         Log.d("MainActivity", "Robot focus gained")
         this.qiContext = qiContext
+
+        // Propaga qiContext a tutti i controller che ne hanno bisogno
         movementController.onRobotReady(qiContext)
         cameraController.onRobotReady(qiContext)
-        servoingController.onRobotReady(qiContext)
+        servoingController.onRobotReady(qiContext)  // propaga a movementController interno
     }
 
     override fun onRobotFocusLost() {
@@ -74,6 +84,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     override fun onRobotFocusRefused(reason: String?) {
         Log.w("MainActivity", "Robot focus refused: $reason")
+        showToast("Robot focus refused: $reason")
     }
 
     // ── Setup UI ──────────────────────────────────────────────────────────────
@@ -87,23 +98,22 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     }
 
     private fun setupVisionButtons() {
-        // Scatto singolo → mostra nella ImageView + bounding boxes nel log
+        // ── Snapshot singolo ──────────────────────────────────────────────────
         binding.btnSnapshot.setOnClickListener {
+            showToast("Capturing frame…")
             cameraController.takeSinglePicture { bitmap, _ ->
                 showBitmapOnUi(bitmap)
                 runDetection(bitmap)
             }
         }
-
-        // Avvia / ferma visual servoing
+        // ── Visual Servoing ON/OFF ────────────────────────────────────────────
         binding.btnTrack.setOnClickListener {
             if (isServoingActive) {
                 servoingController.stopTracking()
                 isServoingActive = false
                 binding.btnTrack.text = "Track Person"
-                showToast("Visual servoing stopped")
+                showToast("Tracking stopped")
             } else {
-                servoingController.targetLabel = "person"
                 servoingController.startTracking(
                     cameraController    = cameraController,
                     detectionController = detectionController,
@@ -111,22 +121,39 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
                 )
                 isServoingActive = true
                 binding.btnTrack.text = "Stop Tracking"
-                showToast("Tracking 'person'…")
+                showToast("Tracking 'person' via PC YOLOv8…")
             }
         }
     }
 
+    private fun setupControllerToggle() {
+
+        binding.btnToggleControls.setOnClickListener {
+
+            if (binding.controllerContainer.visibility == View.GONE) {
+
+                binding.controllerContainer.visibility = View.VISIBLE
+                binding.btnToggleControls.text = "Hide Controller"
+
+            } else {
+
+                binding.controllerContainer.visibility = View.GONE
+                binding.btnToggleControls.text = "Show Controller"
+            }
+        }
+    }
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun runDetection(bitmap: Bitmap) {
-        detectionController.detect(bitmap) { boxes, w, h ->
-            Log.d("MainActivity", "Detected ${boxes.size} objects in ${w}×${h} frame:")
+        detectionController.detect(bitmap) { boxes, imgW, imgH ->
+            Log.d("MainActivity", "=== Detection results (${boxes.size} objects) ===")
             boxes.forEach { box ->
                 Log.d("MainActivity",
-                    "  [${box.source}] ${box.label} %.0f%% @ cx=%.2f cy=%.2f"
+                    "  [${box.source}] ${box.label} %.0f%% cx=%.2f cy=%.2f"
                         .format(box.score * 100, box.cx, box.cy))
             }
-            runOnUiThread { updateOverlay(boxes, bitmap.width, bitmap.height) }
+            // updateOverlay viene chiamato su Main thread dal detect() stesso
+            updateOverlay(boxes, imgW, imgH)
         }
     }
 
@@ -137,10 +164,24 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         }
     }
 
-    private fun updateOverlay(boxes: List<BoundingBox>, w: Int, h: Int) {
-        // BoundingBoxOverlayView.update() – disegna i rettangoli sull'overlay
-        // (vedi BoundingBoxOverlayView.kt da creare nell'iterazione successiva)
-        binding.overlayView.update(boxes, w, h)
+    /**
+     * Aggiorna l'overlay con le bounding boxes.
+     *
+     * FIX: le coordinate bbox sono già normalizzate [0,1] dal server,
+     * quindi BoundingBoxOverlayView deve scalare rispetto alle sue dimensioni
+     * effettive — NON rispetto a imgW/imgH di Pepper (640x480).
+     *
+     * BoundingBoxOverlayView.update() deve usare:
+     *   left   = box.rect.left   * view.width
+     *   top    = box.rect.top    * view.height
+     *   right  = box.rect.right  * view.width
+     *   bottom = box.rect.bottom * view.height
+     */
+    private fun updateOverlay(boxes: List<BoundingBox>, imgW: Int, imgH: Int) {
+        runOnUiThread {
+            // imgW e imgH passati per compatibilità, ma l'overlay usa coordinate normalizzate
+            binding.overlayView.update(boxes, imgW, imgH)
+        }
     }
 
     private fun showToast(msg: String) =

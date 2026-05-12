@@ -17,6 +17,7 @@
         android:textSize="50sp"
         android:textStyle="bold" />
 
+    <!-- CAMERA -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="200dp"
@@ -26,8 +27,8 @@
             android:id="@+id/ivCameraPreview"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:scaleType="fitCenter"
             android:background="#111111"
+            android:scaleType="fitCenter"
             android:visibility="gone" />
 
         <com.example.mypepperapplication.views.BoundingBoxOverlayView
@@ -41,9 +42,9 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:layout_marginBottom="12dp"
         android:gravity="center"
-        android:layout_marginBottom="12dp">
+        android:orientation="horizontal">
 
         <Button
             android:id="@+id/btnSnapshot"
@@ -59,7 +60,7 @@
             android:text="Track Person" />
     </LinearLayout>
 
-    <!-- Message -->
+    <!-- Warning -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -72,13 +73,18 @@
         android:textSize="12sp"
         android:textStyle="bold" />
 
-    <!-- Controller -->
+    <!-- BOTTONE SHOW/HIDE CONTROLS -->
+
+    <!-- CONTROLLER CONTAINER -->
+
     <LinearLayout
+        android:id="@+id/controllerContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:visibility="gone">
 
         <!-- AVANTI -->
         <Button
@@ -132,5 +138,12 @@
             android:textSize="15sp" />
 
     </LinearLayout>
+
+    <Button
+        android:id="@+id/btnToggleControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="Show Controller" />
 
 </LinearLayout>
