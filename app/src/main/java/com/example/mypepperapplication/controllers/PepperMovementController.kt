@@ -1,54 +1,61 @@
 package com.example.mypepperapplication.controllers
 
 import android.util.Log
-// QiSDK core
 import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
-// QiSDK - actuation
-
 import com.aldebaran.qi.sdk.`object`.actuation.OrientationPolicy
 import com.aldebaran.qi.sdk.`object`.actuation.PathPlanningPolicy
-// QiSDK - autonomous abilities
 import com.aldebaran.qi.sdk.`object`.autonomousabilities.DegreeOfFreedom
-// QiSDK - holder
 import com.aldebaran.qi.sdk.`object`.holder.Holder
-// QiSDK - builders
 import com.aldebaran.qi.sdk.builder.GoToBuilder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.aldebaran.qi.sdk.builder.TransformBuilder
-// Coroutines
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "PepperMovement"
 
 class PepperMovementController {
 
-    private var qiContext: QiContext? = null //master key for everything related to the robot
-    private var goToFuture: Future<Void>? = null //it represents the movement in progress
-    private var holder: Holder? = null //lock autonomous rotation of Pepper
+    private var qiContext: QiContext? = null
+    private var goToFuture: Future<Void>? = null
+    private var holder: Holder? = null
     private val step = 1.0
-    // ── Lifecycle ────────────────────────────────────────
+
+    /**
+     * Semaforo: true mentre un GoTo è in esecuzione.
+     * VisualServoingController lo usa per non accumulare comandi.
+     */
+    val isMoving = AtomicBoolean(false)
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     fun onRobotReady(qiContext: QiContext) {
         this.qiContext = qiContext
         holdBaseRotation()
     }
+
     fun onRobotLost() {
         stopMovement()
         releaseBaseRotation()
         qiContext = null
     }
-    // ── Buttons ──────────────────────────────────────────
+
+    // ── Bottoni manuali ───────────────────────────────────────────────────────
+
     fun moveForward()  = moveRobot(x =  step, y = 0.0, theta = 0.0)
     fun moveBackward() = moveRobot(x = -step, y = 0.0, theta = 0.0)
-    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta =  -step)
-    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta = step)
+    fun rotateLeft()   = moveRobot(x = 0.0,  y = 0.0, theta = -step)
+    fun rotateRight()  = moveRobot(x = 0.0,  y = 0.0, theta =  step)
+
     fun stopMovement() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 goToFuture?.requestCancellation()
                 goToFuture = null
+                isMoving.set(false)
                 Log.i(TAG, "Movement stopped.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error stop: ${e.message}")
@@ -56,29 +63,50 @@ class PepperMovementController {
         }
     }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PATCH per PepperMovementController.kt
-// Servono al VisualServoingController per generare comandi di bassa granularità.
-// ─────────────────────────────────────────────────────────────────────────────
+    // ── API visual servoing ───────────────────────────────────────────────────
+
     /**
-     * Ruota di [angleRad] radianti rispetto alla posizione corrente.
+     * Ruota di [angleRad] radianti.
      * Positivo = antiorario (sinistra), Negativo = orario (destra).
-     * Usato dal visual servoing per centrare il target.
+     * [onComplete] viene chiamato su thread IO quando il movimento finisce.
      */
-    fun rotateByAngle(angleRad: Double) = moveRobot(x = 0.0, y = 0.0, theta = angleRad)
+    fun rotateByAngle(angleRad: Double, onComplete: (() -> Unit)? = null) =
+        moveRobot(x = 0.0, y = 0.0, theta = angleRad, onComplete = onComplete)
+
     /**
      * Avanza di [distanceMeters] metri (negativo = indietro).
-     * Usato dal visual servoing per raggiungere la distanza target.
+     * [onComplete] viene chiamato su thread IO quando il movimento finisce.
      */
-    fun moveByDistance(distanceMeters: Double) = moveRobot(x = distanceMeters, y = 0.0, theta = 0.0)
+    fun moveByDistance(distanceMeters: Double, onComplete: (() -> Unit)? = null) =
+        moveRobot(x = distanceMeters, y = 0.0, theta = 0.0, onComplete = onComplete)
 
-    // ── Internal Movement ────────────────────────────────
-    private fun moveRobot(x: Double, y: Double, theta: Double) {
+    // ── Movimento interno ─────────────────────────────────────────────────────
+
+    /**
+     * FIX principale: non cancella il movimento precedente se ancora in corso.
+     * Il chiamante (VisualServoingController) deve controllare isMoving PRIMA
+     * di chiamare questo metodo.
+     *
+     * [onComplete] viene invocato al termine del GoTo (successo o errore).
+     */
+    private fun moveRobot(
+        x: Double,
+        y: Double,
+        theta: Double,
+        onComplete: (() -> Unit)? = null
+    ) {
         val ctx = qiContext ?: run {
-            Log.e(TAG, "qiContext is NULL, impossibility to move")
+            Log.e(TAG, "qiContext null — impossibile muoversi")
+            onComplete?.invoke()
             return
         }
-        goToFuture?.requestCancellation()
+
+        // Cancella il movimento corrente solo se richiamato dai bottoni manuali
+        // (onComplete == null). Il visual servoing gestisce il semaforo da solo.
+        if (onComplete == null) {
+            goToFuture?.requestCancellation()
+        }
+
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.i(TAG, "Starting movement x=$x y=$y theta=$theta")
@@ -92,28 +120,23 @@ class PepperMovementController {
 
                 val targetFrame = mapping.makeFreeFrame()
                 targetFrame.update(robotFrame, transform, 0L)
+
                 val goTo = when {
-                    x > 0 -> {  // forward
-                        GoToBuilder.with(ctx)
-                            .withFrame(targetFrame.frame())
-                            .withMaxSpeed(0.3f)
-                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-                            .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
-                            .build()
-                    }
-                    x < 0 -> {
-                        GoToBuilder.with(ctx)
-                            .withFrame(targetFrame.frame())
-                            .withMaxSpeed(0.3f)
-                            .build()
-                    }
-                    else -> {  // rotation pure: need ALIGN_X to be physically rotated
-                        GoToBuilder.with(ctx)
-                            .withFrame(targetFrame.frame())
-                            .withMaxSpeed(0.3f)
-                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-                            .build()
-                    }
+                    x > 0 -> GoToBuilder.with(ctx)
+                        .withFrame(targetFrame.frame())
+                        .withMaxSpeed(0.3f)
+                        .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                        .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
+                        .build()
+                    x < 0 -> GoToBuilder.with(ctx)
+                        .withFrame(targetFrame.frame())
+                        .withMaxSpeed(0.3f)
+                        .build()
+                    else -> GoToBuilder.with(ctx)
+                        .withFrame(targetFrame.frame())
+                        .withMaxSpeed(0.3f)
+                        .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                        .build()
                 }
 
                 Log.i(TAG, "GoTo built, starting...")
@@ -125,14 +148,21 @@ class PepperMovementController {
                         future.hasError() -> Log.e(TAG, "Error GoTo: ${future.error}")
                         else              -> Log.d(TAG, "Movement deleted.")
                     }
+                    // Notifica il chiamante (visual servoing)
+                    isMoving.set(false)
+                    onComplete?.invoke()
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error movement: ${e.message}", e)
+                isMoving.set(false)
+                onComplete?.invoke()
             }
         }
     }
-    // ── Holder autonomous rotation ────────────────────────
+
+    // ── Holder rotazione autonoma ─────────────────────────────────────────────
+
     private fun holdBaseRotation() {
         val ctx = qiContext ?: return
         try {
@@ -147,6 +177,7 @@ class PepperMovementController {
             Log.e(TAG, "Error hold: ${e.message}")
         }
     }
+
     private fun releaseBaseRotation() {
         try {
             holder?.async()?.release()

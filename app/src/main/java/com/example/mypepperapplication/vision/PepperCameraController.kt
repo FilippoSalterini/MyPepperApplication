@@ -82,7 +82,20 @@ class PepperCameraController {
                     Log.e(TAG, "Frame decode failed")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "takeSinglePicture error: ${e.message}", e)
+                if (e.message?.contains("video device") == true) {
+                    Log.w(TAG, "Camera busy during movement, retry in 200ms...")
+                    delay(200)
+                    try {
+                        val takePicture2 = TakePictureBuilder.with(ctx).build()
+                        val img = takePicture2.async().run().get()
+                        val bitmap = img.toBitmap()
+                        if (bitmap != null) callback.onFrame(bitmap, System.currentTimeMillis())
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Retry failed: ${e2.message}")
+                    }
+                } else {
+                    Log.e(TAG, "takeSinglePicture error: ${e.message}", e)
+                }
             }
         }
     }
