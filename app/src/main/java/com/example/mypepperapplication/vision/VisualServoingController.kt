@@ -25,13 +25,13 @@ class VisualServoingController(
 
     // ── Parametri ─────────────────────────────────────────────────────────────
     var targetLabel: String? = "person"
-    var kpRotation: Float = 0.25f
-    var kpForward: Float = 0.25f
-    var maxRotationStep: Float = 0.06f
-    var maxAdvanceStep: Float = 0.05f
-    var horizontalDeadzone: Float = 0.12f
-    var targetArea: Float = 0.30f
-    var areaDeadzone: Float = 0.05f
+    var kpRotation: Float = 1.5f
+    var kpForward: Float = 1.0f
+    var maxRotationStep: Float = 0.25f
+    var maxAdvanceStep: Float = 1f
+    var horizontalDeadzone: Float = 0.05f
+    var targetArea: Float = 0.5f
+    var areaDeadzone: Float = 0.04f
     var maxMissedFrames: Int = 8
     var cycleDelayMs: Long = 120L
     var smoothingAlpha: Float = 0.4f
@@ -109,40 +109,44 @@ class VisualServoingController(
                 updateSmoothing(target)
 
                 // 4. Calcola errori
-                val errX    = smoothCx - 0.5f
-                val errArea =  targetArea - smoothArea
+                val errX = smoothCx - 0.5f
+                val errArea = targetArea - smoothArea
 
-                val needsRotation = abs(errX)    > horizontalDeadzone
-                val needsAdvance  = abs(errArea) > areaDeadzone
+                val needsRotation = abs(errX) > horizontalDeadzone
+                val needsAdvance = abs(errArea) > areaDeadzone
 
-                Log.d(TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
-                    .format(errX, errArea))
+                Log.d(
+                    TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
+                        .format(errX, errArea)
+                )
 
                 when {
                     needsRotation -> {
                         val theta = (-kpRotation * errX)
                             .coerceIn(-maxRotationStep, maxRotationStep)
                             .toDouble()
-                        Log.d(TAG, "→ Rotate theta=%.3f rad".format(theta))
-                        movementController.cancelAndMove(x = 0.0, y = 0.0, theta = theta)
+                        Log.i(TAG, ">>> ROTATE theta=%.3f rad (errX=%.3f)".format(theta, errX))
+                        movementController.cancelAndMove(x = 0.0, theta = theta)
+                        delay(500L)  // lascia tempo al GoTo
                     }
+
                     needsAdvance -> {
                         val dist = (kpForward * errArea)
                             .coerceIn(-maxAdvanceStep, maxAdvanceStep)
                             .toDouble()
-                        Log.d(TAG, "→ Move dist=%.3f m".format(dist))
-                        movementController.cancelAndMove(x = dist, y = 0.0, theta = 0.0)
+                        Log.i(TAG, ">>> ADVANCE dist=%.3f m (errArea=%.3f)".format(dist, errArea))
+                        movementController.cancelAndMove(x = dist, theta = 0.0)
+                        delay(700L)
                     }
+
                     else -> {
-                        Log.d(TAG, "→ Target centrato.")
+                        Log.d(TAG, "→ Target centrato, fermo.")
                         movementController.stopMovement()
                     }
                 }
-                delay(cycleDelayMs)
             }
         }
     }
-
     fun stopTracking() {
         if (trackingJob?.isActive == true) {
             trackingJob?.cancel()
@@ -181,15 +185,16 @@ class VisualServoingController(
     }
 
     // ── Smoothing ─────────────────────────────────────────────────────────────
-
     private fun updateSmoothing(target: BoundingBox) {
+
         val rawArea = target.rect.width() * target.rect.height()
+
         if (smoothArea < 0f) {
             smoothCx   = target.cx
             smoothArea = rawArea
         } else {
-            smoothCx   = smoothingAlpha * target.cx + (1f - smoothingAlpha) * smoothCx
-            smoothArea = smoothingAlpha * rawArea    + (1f - smoothingAlpha) * smoothArea
+            smoothCx   = smoothingAlpha * target.cx   + (1f - smoothingAlpha) * smoothCx
+            smoothArea = smoothingAlpha * rawArea      + (1f - smoothingAlpha) * smoothArea
         }
         Log.d(TAG, "Smooth cx=%.2f area=%.3f | Raw cx=%.2f area=%.3f"
             .format(smoothCx, smoothArea, target.cx, rawArea))

@@ -60,7 +60,6 @@ class PepperCameraController {
     }
 
     // ── API pubblica ──────────────────────────────────────────────────────────
-
     /**
      * Scatta un singolo frame.
      * Usato da VisualServoingController nel suo loop di controllo.
@@ -136,9 +135,6 @@ class PepperCameraController {
         captureJob = null
         Log.d(TAG, "Continuous capture stopped.")
     }
-
-    // ── toBitmap ──────────────────────────────────────────────────────────────
-
     /**
      * Converte TimestampedImageHandle → Bitmap.
      * Pepper top camera: formato RGB888 raw (3 byte/pixel, 640×480).

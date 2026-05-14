@@ -90,10 +90,10 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     // ── Setup UI ──────────────────────────────────────────────────────────────
 
     private fun setupMovementButtons() {
-        binding.btnForward.setOnClickListener  { movementController.moveForward() }
-        binding.btnBackward.setOnClickListener { movementController.moveBackward() }
-        binding.btnLeft.setOnClickListener     { movementController.rotateLeft() }
-        binding.btnRight.setOnClickListener    { movementController.rotateRight() }
+//        binding.btnForward.setOnClickListener  { movementController.moveForward() }
+//        binding.btnBackward.setOnClickListener { movementController.moveBackward() }
+//        binding.btnLeft.setOnClickListener     { movementController.rotateLeft() }
+//        binding.btnRight.setOnClickListener    { movementController.rotateRight() }
         binding.btnStop.setOnClickListener     { movementController.stopMovement() }
     }
 
