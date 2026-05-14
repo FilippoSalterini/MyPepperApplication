@@ -146,42 +146,17 @@ class PepperCameraController {
      */
     private fun TimestampedImageHandle.toBitmap(): Bitmap? {
         return try {
-            val image  = this.image.value
-            val buffer: ByteBuffer = image.data
-            val bytes  = ByteArray(buffer.remaining())
+            val image = this.image.value
+            val buffer = image.data
+
+            val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
 
-            val width  = 640
-            val height = 480
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-            // RGB888 → ARGB_8888
-            if (bytes.size >= width * height * 3) {
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                val pixels = IntArray(width * height)
-                for (i in pixels.indices) {
-                    val r = bytes[i * 3].toInt() and 0xFF
-                    val g = bytes[i * 3 + 1].toInt() and 0xFF
-                    val b = bytes[i * 3 + 2].toInt() and 0xFF
-                    pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                }
-                bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-                bitmap
-            } else {
-                // Prova come JPEG
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }
         } catch (e: Exception) {
-            Log.e(TAG, "toBitmap error: ${e.message}")
-            try {
-                val image  = this.image.value
-                val buffer = image.data
-                val bytes  = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e2: Exception) {
-                Log.e(TAG, "Fallback JPEG decode failed: ${e2.message}")
-                null
-            }
+            Log.e(TAG, "toBitmap error: ${e.message}", e)
+            null
         }
     }
 }

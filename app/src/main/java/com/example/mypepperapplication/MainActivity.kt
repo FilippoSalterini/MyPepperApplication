@@ -27,8 +27,8 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     private val movementController  = PepperMovementController()
     private val cameraController    = PepperCameraController()
     private val detectionController = ObjectDetectionController().apply {
-        // ⚠️ IMPORTANTE: sostituisci con l'IP del tuo PC sulla LAN WiFi
-        // Trovi l'IP su Windows con: ipconfig → "Indirizzo IPv4"
+
+        //sostituisci con l'IP del tuo PC sulla LAN WiFi - trovi l'IP su Windows con: ipconfig → "Indirizzo IPv4"
         serverUrl = "http://10.186.13.27:8000"
 
         // Fallback mock se il server non risponde (utile per test senza PC)
@@ -163,20 +163,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
             binding.ivCameraPreview.visibility = View.VISIBLE
         }
     }
-
-    /**
-     * Aggiorna l'overlay con le bounding boxes.
-     *
-     * FIX: le coordinate bbox sono già normalizzate [0,1] dal server,
-     * quindi BoundingBoxOverlayView deve scalare rispetto alle sue dimensioni
-     * effettive — NON rispetto a imgW/imgH di Pepper (640x480).
-     *
-     * BoundingBoxOverlayView.update() deve usare:
-     *   left   = box.rect.left   * view.width
-     *   top    = box.rect.top    * view.height
-     *   right  = box.rect.right  * view.width
-     *   bottom = box.rect.bottom * view.height
-     */
+    // le coordinate bbox sono già normalizzate [0,1] dal server
     private fun updateOverlay(boxes: List<BoundingBox>, imgW: Int, imgH: Int) {
         runOnUiThread {
             // imgW e imgH passati per compatibilità, ma l'overlay usa coordinate normalizzate

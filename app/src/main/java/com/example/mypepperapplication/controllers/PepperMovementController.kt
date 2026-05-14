@@ -5,15 +5,15 @@ import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.`object`.actuation.OrientationPolicy
 import com.aldebaran.qi.sdk.`object`.actuation.PathPlanningPolicy
-import com.aldebaran.qi.sdk.`object`.autonomousabilities.DegreeOfFreedom
 import com.aldebaran.qi.sdk.`object`.holder.Holder
 import com.aldebaran.qi.sdk.builder.GoToBuilder
-import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.aldebaran.qi.sdk.builder.TransformBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val TAG = "PepperMovement"
 
@@ -24,22 +24,20 @@ class PepperMovementController {
     private var holder: Holder? = null
     private val step = 1.0
 
-    /**
-     * Semaforo: true mentre un GoTo è in esecuzione.
-     * VisualServoingController lo usa per non accumulare comandi.
-     */
     val isMoving = AtomicBoolean(false)
+    private var lastCommandTime = 0L
+    private val moveMutex = Mutex()
+    private val COMMAND_INTERVAL = 250L
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     fun onRobotReady(qiContext: QiContext) {
         this.qiContext = qiContext
-        holdBaseRotation()
+        // holdBaseRotation() commentato — bloccava la rotazione della base
     }
 
     fun onRobotLost() {
         stopMovement()
-        releaseBaseRotation()
         qiContext = null
     }
 
@@ -63,32 +61,87 @@ class PepperMovementController {
         }
     }
 
-    // ── API visual servoing ───────────────────────────────────────────────────
+    // ── API visual servoing (con onComplete — versione "wait")
+    // cancelAndMove — per visual servoing fire-and-forget
+    fun cancelAndMove(x: Double, y: Double, theta: Double) {
+        val now = System.currentTimeMillis()
+        if (now - lastCommandTime < COMMAND_INTERVAL) {
+            Log.d(TAG, "cancelAndMove: rate limited, skip")
+            return
+        }
+        lastCommandTime = now
 
-    /**
-     * Ruota di [angleRad] radianti.
-     * Positivo = antiorario (sinistra), Negativo = orario (destra).
-     * [onComplete] viene chiamato su thread IO quando il movimento finisce.
-     */
-    fun rotateByAngle(angleRad: Double, onComplete: (() -> Unit)? = null) =
-        moveRobot(x = 0.0, y = 0.0, theta = angleRad, onComplete = onComplete)
+        val ctx = qiContext ?: run {
+            Log.e(TAG, "cancelAndMove: qiContext null")
+            return
+        }
 
-    /**
-     * Avanza di [distanceMeters] metri (negativo = indietro).
-     * [onComplete] viene chiamato su thread IO quando il movimento finisce.
-     */
-    fun moveByDistance(distanceMeters: Double, onComplete: (() -> Unit)? = null) =
-        moveRobot(x = distanceMeters, y = 0.0, theta = 0.0, onComplete = onComplete)
+        CoroutineScope(Dispatchers.IO).launch {
+            moveMutex.withLock {
+                try {
+                    // Cancella il movimento precedente
+                    goToFuture?.requestCancellation()
+                    goToFuture = null
 
-    // ── Movimento interno ─────────────────────────────────────────────────────
+                    Log.d(TAG, "cancelAndMove: x=%.3f theta=%.3f".format(x, theta))
 
-    /**
-     * FIX principale: non cancella il movimento precedente se ancora in corso.
-     * Il chiamante (VisualServoingController) deve controllare isMoving PRIMA
-     * di chiamare questo metodo.
-     *
-     * [onComplete] viene invocato al termine del GoTo (successo o errore).
-     */
+                    val actuation = ctx.actuation
+                    val mapping = ctx.mapping
+                    val robotFrame = actuation.robotFrame()
+
+                    val transform = TransformBuilder.create()
+                        .from2DTransform(x, y, theta)
+
+                    val targetFrame = mapping.makeFreeFrame()
+                    targetFrame.update(robotFrame, transform, 0L)
+
+                    val goTo = when {
+                        x > 0 -> GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.35f)
+                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                            .withPathPlanningPolicy(PathPlanningPolicy.STRAIGHT_LINES_ONLY)
+                            .build()
+
+                        x < 0 -> GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.35f)
+                            .build()
+
+                        else -> GoToBuilder.with(ctx)
+                            .withFrame(targetFrame.frame())
+                            .withMaxSpeed(0.35f)
+                            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
+                            .build()
+                    }
+
+                    goToFuture = goTo.async().run()
+                    isMoving.set(true)
+
+                    // Registra callback solo per logging — non blocca nulla
+                    goToFuture?.thenConsume { future ->
+                        isMoving.set(false)
+                        when {
+                            future.isSuccess -> Log.d(TAG, "cancelAndMove completed.")
+                            future.hasError() -> Log.d(
+                                TAG,
+                                "cancelAndMove interrupted: ${future.error}"
+                            )
+
+                            else -> Log.d(TAG, "cancelAndMove cancelled.")
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "cancelAndMove error: ${e.message}")
+                    isMoving.set(false)
+                }
+            }
+        }
+    }
+
+    // ── Movimento interno
+
     private fun moveRobot(
         x: Double,
         y: Double,
@@ -96,13 +149,11 @@ class PepperMovementController {
         onComplete: (() -> Unit)? = null
     ) {
         val ctx = qiContext ?: run {
-            Log.e(TAG, "qiContext null — impossibile muoversi")
+            Log.e(TAG, "qiContext null")
             onComplete?.invoke()
             return
         }
 
-        // Cancella il movimento corrente solo se richiamato dai bottoni manuali
-        // (onComplete == null). Il visual servoing gestisce il semaforo da solo.
         if (onComplete == null) {
             goToFuture?.requestCancellation()
         }
@@ -148,7 +199,6 @@ class PepperMovementController {
                         future.hasError() -> Log.e(TAG, "Error GoTo: ${future.error}")
                         else              -> Log.d(TAG, "Movement deleted.")
                     }
-                    // Notifica il chiamante (visual servoing)
                     isMoving.set(false)
                     onComplete?.invoke()
                 }
@@ -161,30 +211,31 @@ class PepperMovementController {
         }
     }
 
-    // ── Holder rotazione autonoma ─────────────────────────────────────────────
+// ── Holder (commentato — bloccava rotazione base) ─────────────────────────
+//
+//    private fun holdBaseRotation() {
+//        val ctx = qiContext ?: return
+//        try {
+//            if (holder == null) {
+//                holder = HolderBuilder.with(ctx)
+//                    .withDegreesOfFreedom(DegreeOfFreedom.ROBOT_FRAME_ROTATION)
+//                    .build()
+//            }
+//            holder?.async()?.hold()
+//            Log.d(TAG, "Autonomous rotation blocked.")
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Error hold: ${e.message}")
+//        }
+//    }
+//
+//    private fun releaseBaseRotation() {
+//        try {
+//            holder?.async()?.release()
+//            holder = null
+//            Log.d(TAG, "Autonomous rotation released.")
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Error release: ${e.message}")
+//        }
+//    }
 
-    private fun holdBaseRotation() {
-        val ctx = qiContext ?: return
-        try {
-            if (holder == null) {
-                holder = HolderBuilder.with(ctx)
-                    .withDegreesOfFreedom(DegreeOfFreedom.ROBOT_FRAME_ROTATION)
-                    .build()
-            }
-            holder?.async()?.hold()
-            Log.d(TAG, "Autonomous rotation blocked.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error hold: ${e.message}")
-        }
-    }
-
-    private fun releaseBaseRotation() {
-        try {
-            holder?.async()?.release()
-            holder = null
-            Log.d(TAG, "Autonomous rotation released.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error release: ${e.message}")
-        }
-    }
 }
