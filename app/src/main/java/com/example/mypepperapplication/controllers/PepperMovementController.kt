@@ -27,7 +27,7 @@ class PepperMovementController {
     val isMoving = AtomicBoolean(false)
     private var lastCommandTime = 0L
     private val moveMutex = Mutex()
-    private val COMMAND_INTERVAL = 250L
+    private val COMMAND_INTERVAL = 350L
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 

@@ -17,15 +17,6 @@ import com.example.mypepperapplication.controllers.PepperMovementController
 
 private const val TAG = "VisualServoing"
 
-/**
- * Loop:
- *   1. Scatta frame (suspend)
- *   2. Detection PC (suspend)
- *   3. Seleziona target + smoothing
- *   4. cancelAndMove() — cancella precedente, lancia nuovo, NON aspetta
- *   5. delay(100ms) → torna al punto 1
- *   Ciclo totale: ~300ms → ~3Hz
- */
 class VisualServoingController(
     private val movementController: PepperMovementController
 ) {
@@ -34,15 +25,15 @@ class VisualServoingController(
 
     // ── Parametri ─────────────────────────────────────────────────────────────
     var targetLabel: String? = "person"
-    var kpRotation: Float = 0.35f
-    var kpForward: Float = 0.3f
-    var maxRotationStep: Float = 0.12f
-    var maxAdvanceStep: Float = 0.06f
-    var horizontalDeadzone: Float = 0.05f
-    var targetArea: Float = 0.10f
-    var areaDeadzone: Float = 0.02f
+    var kpRotation: Float = 0.25f
+    var kpForward: Float = 0.25f
+    var maxRotationStep: Float = 0.06f
+    var maxAdvanceStep: Float = 0.05f
+    var horizontalDeadzone: Float = 0.12f
+    var targetArea: Float = 0.30f
+    var areaDeadzone: Float = 0.05f
     var maxMissedFrames: Int = 8
-    var cycleDelayMs: Long = 100L
+    var cycleDelayMs: Long = 120L
     var smoothingAlpha: Float = 0.4f
 
     // ── Smoothing state ───────────────────────────────────────────────────────
@@ -84,7 +75,6 @@ class VisualServoingController(
             var missedFrames = 0
 
             while (isActive) {
-
                 // 1. Scatta frame
                 val bitmap: Bitmap = suspendCancellableCoroutine { cont ->
                     cameraController.takeSinglePicture(
@@ -111,7 +101,7 @@ class VisualServoingController(
                         isTargetLocked = false
                         movementController.stopMovement()
                     }
-                    delay(400)
+                    delay(150)
                     continue
                 }
 
@@ -120,7 +110,7 @@ class VisualServoingController(
 
                 // 4. Calcola errori
                 val errX    = smoothCx - 0.5f
-                val errArea = targetArea - smoothArea
+                val errArea =  targetArea - smoothArea
 
                 val needsRotation = abs(errX)    > horizontalDeadzone
                 val needsAdvance  = abs(errArea) > areaDeadzone
@@ -128,7 +118,6 @@ class VisualServoingController(
                 Log.d(TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
                     .format(errX, errArea))
 
-                // 5. FIRE AND FORGET — cancella precedente, lancia nuovo, NON aspetta
                 when {
                     needsRotation -> {
                         val theta = (-kpRotation * errX)
@@ -149,7 +138,6 @@ class VisualServoingController(
                         movementController.stopMovement()
                     }
                 }
-
                 delay(cycleDelayMs)
             }
         }
