@@ -6,6 +6,7 @@ import com.aldebaran.qi.sdk.QiContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -20,6 +21,7 @@ private const val TAG = "VisualServoing"
 class VisualServoingController(
     private val movementController: PepperMovementController
 ) {
+    private val scope = CoroutineScope(Dispatchers.IO + Job())
 
     private var trackingJob: Job? = null
 
@@ -37,12 +39,10 @@ class VisualServoingController(
     var smoothingAlpha: Float = 0.4f
 
     // ── Smoothing state ───────────────────────────────────────────────────────
-
     private var smoothCx: Float = 0.5f
     private var smoothArea: Float = -1f
 
     // ── Target locking ────────────────────────────────────────────────────────
-
     private var lastTargetCx: Float = 0.5f
     private var lastTargetCy: Float = 0.5f
     private var isTargetLocked: Boolean = false
@@ -56,6 +56,7 @@ class VisualServoingController(
 
     fun onRobotLost() {
         stopTracking()
+        scope.coroutineContext.cancelChildren()
         movementController.onRobotLost()
     }
 
@@ -69,9 +70,9 @@ class VisualServoingController(
         targetLabel = label
         stopTracking()
         resetState()
-        Log.i(TAG, "Visual servoing v5 started. Target='$label'")
+        Log.i(TAG, "Visual servoing started. Target='$label'")
 
-        trackingJob = CoroutineScope(Dispatchers.IO).launch {
+        trackingJob = scope.launch {
             var missedFrames = 0
 
             while (isActive) {
@@ -89,8 +90,8 @@ class VisualServoingController(
                     }
                 }
 
-                // 3. Seleziona target - Prova ad introdurre un id su primapersone detectata
-                // e fai seguire quel id (?)
+                // 3. Seleziona target
+                // TODO: introdurre un id sulla prima persona detectata e seguire quell'id
                 val target = selectTarget(boxes, label)
 
                 if (target == null) {
@@ -100,7 +101,7 @@ class VisualServoingController(
                         isTargetLocked = false
                         movementController.stopMovement()
                     }
-                    delay(150)
+                    delay(cycleDelayMs)
                     continue
                 }
 
@@ -108,16 +109,14 @@ class VisualServoingController(
                 updateSmoothing(target)
 
                 // 4. Calcola errori
-                val errX = smoothCx - 0.5f
+                val errX    = smoothCx - 0.5f
                 val errArea = targetArea - smoothArea
 
                 val needsRotation = abs(errX) > horizontalDeadzone
-                val needsAdvance = abs(errArea) > areaDeadzone
+                val needsAdvance  = abs(errArea) > areaDeadzone
 
-                Log.d(
-                    TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
-                        .format(errX, errArea)
-                )
+                Log.d(TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
+                    .format(errX, errArea))
 
                 when {
                     needsRotation -> {
@@ -126,7 +125,7 @@ class VisualServoingController(
                             .toDouble()
                         Log.i(TAG, ">>> ROTATE theta=%.3f rad (errX=%.3f)".format(theta, errX))
                         movementController.cancelAndMove(x = 0.0, theta = theta)
-                        delay(500L) //fixa per verificare sincronicità con tempo goTo
+                        delay(500L)
                     }
 
                     needsAdvance -> {
@@ -146,6 +145,7 @@ class VisualServoingController(
             }
         }
     }
+
     fun stopTracking() {
         if (trackingJob?.isActive == true) {
             trackingJob?.cancel()
@@ -155,9 +155,6 @@ class VisualServoingController(
         trackingJob = null
         resetState()
     }
-
-    val isTracking: Boolean get() = trackingJob?.isActive == true
-
     // ── Selezione target ──────────────────────────────────────────────────────
 
     private fun selectTarget(boxes: List<BoundingBox>, label: String): BoundingBox? {
@@ -184,14 +181,15 @@ class VisualServoingController(
     }
 
     // ── Smoothing ─────────────────────────────────────────────────────────────
+
     private fun updateSmoothing(target: BoundingBox) {
         val rawArea = target.rect.width() * target.rect.height()
         if (smoothArea < 0f) {
             smoothCx   = target.cx
             smoothArea = rawArea
         } else {
-            smoothCx   = smoothingAlpha * target.cx   + (1f - smoothingAlpha) * smoothCx
-            smoothArea = smoothingAlpha * rawArea      + (1f - smoothingAlpha) * smoothArea
+            smoothCx   = smoothingAlpha * target.cx + (1f - smoothingAlpha) * smoothCx
+            smoothArea = smoothingAlpha * rawArea   + (1f - smoothingAlpha) * smoothArea
         }
         Log.d(TAG, "Smooth cx=%.2f area=%.3f | Raw cx=%.2f area=%.3f"
             .format(smoothCx, smoothArea, target.cx, rawArea))

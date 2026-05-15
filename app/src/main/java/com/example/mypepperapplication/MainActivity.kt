@@ -47,14 +47,13 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         QiSDK.register(this, this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        setupControllerToggle()
-        setupMovementButtons()
+        //setupControllerToggle()
+        //setupMovementButtons()
         setupVisionButtons()
     }
 
     override fun onDestroy() {
         servoingController.stopTracking()
-        cameraController.stopContinuousCapture()
         QiSDK.unregister(this, this)
         super.onDestroy()
     }
@@ -87,11 +86,11 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     // ── Setup UI ──────────────────────────────────────────────────────────────
 
     private fun setupMovementButtons() {
-//        binding.btnForward.setOnClickListener  { movementController.moveForward() }
-//        binding.btnBackward.setOnClickListener { movementController.moveBackward() }
-//        binding.btnLeft.setOnClickListener     { movementController.rotateLeft() }
-//        binding.btnRight.setOnClickListener    { movementController.rotateRight() }
-        binding.btnStop.setOnClickListener     { movementController.stopMovement() }
+    // binding.btnForward.setOnClickListener  { movementController.moveForward() }
+    // binding.btnBackward.setOnClickListener { movementController.moveBackward() }
+    // binding.btnLeft.setOnClickListener     { movementController.rotateLeft() }
+    // binding.btnRight.setOnClickListener    { movementController.rotateRight() }
+    // binding.btnStop.setOnClickListener     { movementController.stopMovement() }
     }
 
     private fun setupVisionButtons() {
@@ -123,22 +122,22 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         }
     }
 
-    private fun setupControllerToggle() {
-
-        binding.btnToggleControls.setOnClickListener {
-
-            if (binding.controllerContainer.visibility == View.GONE) {
-
-                binding.controllerContainer.visibility = View.VISIBLE
-                binding.btnToggleControls.text = "Close Controller"
-
-            } else {
-
-                binding.controllerContainer.visibility = View.GONE
-                binding.btnToggleControls.text = "Open Controller"
-            }
-        }
-    }
+//    private fun setupControllerToggle() {
+//
+//        binding.btnToggleControls.setOnClickListener {
+//
+//            if (binding.controllerContainer.visibility == View.GONE) {
+//
+//                binding.controllerContainer.visibility = View.VISIBLE
+//                binding.btnToggleControls.text = "Close Controller"
+//
+//            } else {
+//
+//                binding.controllerContainer.visibility = View.GONE
+//                binding.btnToggleControls.text = "Open Controller"
+//            }
+//        }
+//    }
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun runDetection(bitmap: Bitmap) {

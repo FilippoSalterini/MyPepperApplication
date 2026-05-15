@@ -23,6 +23,13 @@ class PepperMovementController {
     }
 
     fun cancelAndMove(x: Double = 0.0, theta: Double = 0.0) {
+        // se viene chiamato per errore un cancelAndMove con parametri nulli viene costrito
+        // e lanciato un goTo che non si muove--> aggiunto un guard per evitare questo errore
+        if(x == 0.0 && theta == 0.0){
+            Log.i(TAG, "cancelAndMove called: no movement")
+            return
+        }
+
         val ctx = qiContext ?: run {
             Log.e(TAG, "cancelAndMove: QiContext NULL — robot non pronto!")
             return
@@ -43,8 +50,10 @@ class PepperMovementController {
 
         currentGoToFuture = goTo.async().run().thenConsume { future ->
             when {
-                future.isSuccess   -> Log.i(TAG, "GoTo completed ✓ x=$x theta=$theta")
-                future.isCancelled -> Log.i(TAG, "GoTo cancelled")
+                future.isSuccess -> {
+                    currentGoToFuture = null
+                    Log.i(TAG, "GoTo completed ✓ x=$x theta=$theta")
+                }                future.isCancelled -> Log.i(TAG, "GoTo cancelled")
                 future.hasError()  -> Log.e(TAG, "GoTo ERROR: ${future.errorMessage}")
             }
         }

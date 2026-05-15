@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 import com.example.mypepperapplication.vision.BoundingBox
 
@@ -23,7 +24,7 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     private var boxes: List<BoundingBox> = emptyList()
 
     // Ratio immagine Pepper (1280×960)
-    private val imageRatio = 1280f / 960f
+    private val imageRatio = 4f / 3f
 
     // ── Paint ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,11 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     // ── API pubblica ──────────────────────────────────────────────────────────
 
     fun update(boxes: List<BoundingBox>, imgW: Int = 0, imgH: Int = 0) {
+        if (imgW > 0 && imgH > 0) {
+            val incomingRatio = imgW.toFloat() / imgH
+            if(Math.abs(incomingRatio - imageRatio) > 0.01f)
+                Log.w("BoundingBoxOverlayView", "Ratio Mismatch: atteso $imageRatio, ricevuto $incomingRatio")
+        }
         this.boxes = boxes
         invalidate()
     }
@@ -71,15 +77,6 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
         val vw = width.toFloat()
         val vh = height.toFloat()
         if (vw == 0f || vh == 0f) return
-
-        // ── FIX: calcola area effettiva dell'immagine (fitCenter) ─────────────
-        //
-        // ImageView con scaleType="fitCenter" scala l'immagine mantenendo il ratio,
-        // centrandola nel view con bande nere dove necessario.
-        //
-        // Se viewRatio < imageRatio → bande nere a sinistra e destra (il tuo caso)
-        // Se viewRatio > imageRatio → bande nere sopra e sotto
-        //
         val viewRatio = vw / vh
         val imgLeft: Float
         val imgTop: Float
@@ -110,7 +107,7 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
             val bottom = imgTop  + box.rect.bottom * imgHeight
             val rect   = RectF(left, top, right, bottom)
 
-            val color = colorBySource[box.source] ?: colorBySource["unknown"]!!
+            val color = colorBySource[box.source] ?: Color.parseColor("#40C4FF")
             boxPaint.color = color
 
             canvas.drawRoundRect(rect, 8f, 8f, boxPaint)

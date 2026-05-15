@@ -9,48 +9,44 @@ import com.aldebaran.qi.sdk.builder.TakePictureBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "PepperCamera"
 
 class PepperCameraController {
+    private val scope = CoroutineScope(Dispatchers.IO + Job())
+    private val captureInProgress = AtomicBoolean(false)
 
     fun interface FrameCallback {
         /** Chiamato su thread IO ogni volta che un nuovo frame è disponibile. */
         fun onFrame(bitmap: Bitmap, timestampMs: Long)
     }
 
-    // ── Stato interno ─────────────────────────────────────────────────────────
-
     private var qiContext: QiContext? = null
-    private var captureJob: Job? = null
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
         Log.d(TAG, "Camera controller ready.")
     }
-
     fun onRobotLost() {
-        stopContinuousCapture()
+        scope.coroutineContext.cancelChildren()
         qiContext = null
+        Log.d(TAG, "Camera controller released.")
     }
-
-    // ── API pubblica ──────────────────────────────────────────────────────────
-    /**
-     * Scatta un singolo frame.
-     * Usato da VisualServoingController nel suo loop di controllo.
-     */
+    //API pubblica
     fun takeSinglePicture(callback: FrameCallback) {
         val ctx = qiContext ?: run {
             Log.e(TAG, "takeSinglePicture: qiContext null — robot non connesso?")
             return
         }
-        CoroutineScope(Dispatchers.IO).launch {
+        if (!captureInProgress.compareAndSet(false, true)) {
+            Log.d(TAG, "Capture skipped: previous still running")
+            return
+        }
+
+        scope.launch {
             try {
                 val takePicture = TakePictureBuilder.with(ctx).build()
                 val timestampedImage: TimestampedImageHandle = takePicture.async().run().get()
@@ -76,57 +72,35 @@ class PepperCameraController {
                 } else {
                     Log.e(TAG, "takeSinglePicture error: ${e.message}", e)
                 }
+            } finally {
+                captureInProgress.set(false)
             }
         }
     }
-
-    fun startContinuousCapture(targetFps: Int = 3, callback: FrameCallback) {
-        if (captureJob?.isActive == true) {
-            Log.w(TAG, "Continuous capture already running.")
-            return
-        }
-        val ctx = qiContext ?: run {
-            Log.e(TAG, "startContinuousCapture: qiContext null")
-            return
-        }
-        val delayMs = 1000L / targetFps
-        Log.d(TAG, "Starting continuous capture at $targetFps fps")
-
-        captureJob = CoroutineScope(Dispatchers.IO).launch {
-            while (isActive) {
-                try {
-                    val takePicture = TakePictureBuilder.with(ctx).build()
-                    val img: TimestampedImageHandle = takePicture.async().run().get()
-                    val bitmap = img.toBitmap()
-                    if (bitmap != null) callback.onFrame(bitmap, img.time)
-                } catch (e: Exception) {
-                    if (isActive) Log.e(TAG, "Capture error: ${e.message}")
-                }
-                delay(delayMs)
-            }
-        }
-    }
-
-    fun stopContinuousCapture() {
-        captureJob?.cancel()
-        captureJob = null
-        Log.d(TAG, "Continuous capture stopped.")
-    }
-    /**
-     * Converte TimestampedImageHandle → Bitmap.
-     * Pepper top camera: formato RGB888 raw (3 byte/pixel, 640×480).
-     * Fallback: BitmapFactory se il formato è JPEG.
-     */
+    // ── Conversione immagine ──────────────────────────────────────────────────
+    private var formatDiagnosticDone = false
     private fun TimestampedImageHandle.toBitmap(): Bitmap? {
         return try {
             val image = this.image.value
             val buffer = image.data
-
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
-
+            // Log diagnostico
+            if (!formatDiagnosticDone) {
+                formatDiagnosticDone = true
+                val expectedRgb888 = 640 * 480 * 3   // 921.600
+                val expectedRgb888_320 = 320 * 240 * 3 // 230.400
+                Log.i(TAG, "=== FORMATO CAMERA DIAGNOSTICO ===")
+                Log.i(TAG, "Buffer size: ${bytes.size} byte")
+                Log.i(TAG, "Atteso RGB888 640x480: $expectedRgb888 | 320x240: $expectedRgb888_320")
+                Log.i(TAG, "Primi 4 byte (JPEG inizia con FF D8 FF): ${bytes.take(4).map { "%02X".format(it) }}")
+                if (bytes.size == expectedRgb888 || bytes.size == expectedRgb888_320) {
+                    Log.w(TAG, "ATTENZIONE: sembra RGB888 raw — decodeByteArray potrebbe restituire null!")
+                } else {
+                    Log.i(TAG, "Probabile JPEG compresso — decodeByteArray dovrebbe funzionare.")
+                }
+            }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-
         } catch (e: Exception) {
             Log.e(TAG, "toBitmap error: ${e.message}", e)
             null
