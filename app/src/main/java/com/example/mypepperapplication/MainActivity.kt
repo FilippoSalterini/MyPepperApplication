@@ -39,17 +39,14 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     private val servoingController = VisualServoingController(movementController)
 
     // ── Stato UI ──────────────────────────────────────────────────────────────
-
     private var isServoingActive = false
 
     // ── Lifecycle Android ─────────────────────────────────────────────────────
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         QiSDK.register(this, this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         setupControllerToggle()
         setupMovementButtons()
         setupVisionButtons()

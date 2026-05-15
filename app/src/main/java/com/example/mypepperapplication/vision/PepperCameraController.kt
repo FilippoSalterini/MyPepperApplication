@@ -16,26 +16,7 @@ import java.nio.ByteBuffer
 
 private const val TAG = "PepperCamera"
 
-/**
- * PepperCameraController — acquisizione frame dalla camera frontale di Pepper.
- *
- * Architettura PC-side:
- *   Questo controller fornisce SOLO i frame raw.
- *   NON esegue AI. I frame vengono inviati al PC da ObjectDetectionController.
- *
- * Nota su TakePicture:
- *   QiSDK TakePicture è pensato per snapshot, NON per streaming video.
- *   Frequenza reale: 2-5 fps (limitato da QiSDK, non dalla rete).
- *   Per visual servoing a 2-3 fps è sufficiente con inferenza CPU sul PC.
- *
- * Nota su [startContinuousCapture]:
- *   Non usare startContinuousCapture insieme a VisualServoingController.startTracking(),
- *   perché VisualServoingController chiama già takeSinglePicture() nel suo loop.
- *   Usa startContinuousCapture solo per preview/debug standalone.
- */
 class PepperCameraController {
-
-    // ── Interfaccia callback ──────────────────────────────────────────────────
 
     fun interface FrameCallback {
         /** Chiamato su thread IO ogni volta che un nuovo frame è disponibile. */
@@ -99,10 +80,6 @@ class PepperCameraController {
         }
     }
 
-    /**
-     * Cattura continua a fps fissi. Usa solo per preview standalone o debug.
-     * NON usare insieme a VisualServoingController (duplica le richieste camera).
-     */
     fun startContinuousCapture(targetFps: Int = 3, callback: FrameCallback) {
         if (captureJob?.isActive == true) {
             Log.w(TAG, "Continuous capture already running.")

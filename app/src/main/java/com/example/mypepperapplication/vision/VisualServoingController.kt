@@ -77,11 +77,9 @@ class VisualServoingController(
             while (isActive) {
                 // 1. Scatta frame
                 val bitmap: Bitmap = suspendCancellableCoroutine { cont ->
-                    cameraController.takeSinglePicture(
-                        PepperCameraController.FrameCallback { bmp, _ ->
-                            if (cont.isActive) cont.resume(bmp)
-                        }
-                    )
+                    cameraController.takeSinglePicture { bmp, _ ->
+                        if (cont.isActive) cont.resume(bmp)
+                    }
                 }
 
                 // 2. Detection
@@ -91,7 +89,8 @@ class VisualServoingController(
                     }
                 }
 
-                // 3. Seleziona target
+                // 3. Seleziona target - Prova ad introdurre un id su primapersone detectata
+                // e fai seguire quel id (?)
                 val target = selectTarget(boxes, label)
 
                 if (target == null) {
@@ -127,7 +126,7 @@ class VisualServoingController(
                             .toDouble()
                         Log.i(TAG, ">>> ROTATE theta=%.3f rad (errX=%.3f)".format(theta, errX))
                         movementController.cancelAndMove(x = 0.0, theta = theta)
-                        delay(500L)  // lascia tempo al GoTo
+                        delay(500L) //fixa per verificare sincronicità con tempo goTo
                     }
 
                     needsAdvance -> {
@@ -186,9 +185,7 @@ class VisualServoingController(
 
     // ── Smoothing ─────────────────────────────────────────────────────────────
     private fun updateSmoothing(target: BoundingBox) {
-
         val rawArea = target.rect.width() * target.rect.height()
-
         if (smoothArea < 0f) {
             smoothCx   = target.cx
             smoothArea = rawArea

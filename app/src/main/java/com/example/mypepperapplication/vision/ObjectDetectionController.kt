@@ -17,7 +17,6 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "ObjectDetection"
-
 /**
  * Bounding box normalizzata [0,1] + metadati del rilevamento.
  */
@@ -30,21 +29,18 @@ data class BoundingBox(
     val source: String = "unknown"
 )
 class ObjectDetectionController {
-
-    // ── Callback ──────────────────────────────────────────────────────────────
-
     fun interface DetectionCallback {
         fun onDetections(boxes: List<BoundingBox>, imageWidth: Int, imageHeight: Int)
     }
 
-    // ── Config ────────────────────────────────────────────────────────────────
-    //URL server Python sul PC. Modifica con l'IP del tuo PC sulla LAN
+    // Configurazione ───────────────────────────────────────────────────────
+    //URL da modificare con IP corretta
     var serverUrl: String = "http://10.186.13.27:8000"
 
-    /** Qualità JPEG per il trasferimento (70 = buon bilanciamento qualità/velocità). */
+    //Qualità JPEG per trasferimento
     var jpegQuality: Int = 70
-
-    /** Se true, usa mock detections quando il server non è raggiungibile. */
+    // qui ho impostato una mock detection(true) che restituisce una lista vuota
+    // ma non mi interssa veramente che ritorni qualcosa di fake
     var useMockFallback: Boolean = true
 
     private val httpClient by lazy {
@@ -54,13 +50,8 @@ class ObjectDetectionController {
             .build()
     }
 
-    // ── API pubblica ──────────────────────────────────────────────────────────
-
-    /**
-     * Invia [bitmap] al server YOLOv8 sul PC e consegna i risultati a [callback].
-     * Chiamata NON bloccante — eseguita su Dispatchers.IO.
-     */
-
+    //API pubblica
+    // Invia [bitmap] al server YOLOv8 sul PC e consegna i risultati a [callback]
     fun detect(bitmap: Bitmap, callback: DetectionCallback) {
         CoroutineScope(Dispatchers.IO).launch {
             val boxes = runRemoteYolo(bitmap)
@@ -70,7 +61,7 @@ class ObjectDetectionController {
         }
     }
 
-    // ── Remote YOLO (PC server) ───────────────────────────────────────────────
+    // Remote yolo - server pc
 
     private fun runRemoteYolo(bitmap: Bitmap): List<BoundingBox> {
         return try {
@@ -153,8 +144,6 @@ class ObjectDetectionController {
         Log.w(TAG, "Server unreachable, returning empty list")
         return emptyList()
     }
-
-    // ── Utility ───────────────────────────────────────────────────────────────
     private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
