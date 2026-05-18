@@ -25,12 +25,12 @@ class VisualServoingController(
 
     private var trackingJob: Job? = null
 
-    // ── Parametri ─────────────────────────────────────────────────────────────
+    // Parametri
     var targetLabel: String? = "person"
     var kpRotation: Float = 1.5f
     var kpForward: Float = 1.0f
     var maxRotationStep: Float = 0.25f
-    var maxAdvanceStep: Float = 1f
+    var maxAdvanceStep: Float = 2f
     var horizontalDeadzone: Float = 0.05f
     var targetArea: Float = 0.5f
     var areaDeadzone: Float = 0.04f
@@ -38,30 +38,25 @@ class VisualServoingController(
     var cycleDelayMs: Long = 120L
     var smoothingAlpha: Float = 0.4f
 
-    // ── Smoothing state ───────────────────────────────────────────────────────
+    // Smoothing state
     private var smoothCx: Float = 0.5f
     private var smoothArea: Float = -1f
 
-    // ── Target locking ────────────────────────────────────────────────────────
+    // target locking
     private var lastTargetCx: Float = 0.5f
     private var lastTargetCy: Float = 0.5f
     private var isTargetLocked: Boolean = false
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     fun onRobotReady(ctx: QiContext) {
         movementController.onRobotReady(ctx)
         Log.d(TAG, "Robot ready.")
     }
-
     fun onRobotLost() {
         stopTracking()
         scope.coroutineContext.cancelChildren()
         movementController.onRobotLost()
     }
-
     // ── API pubblica ──────────────────────────────────────────────────────────
-
     fun startTracking(
         cameraController: PepperCameraController,
         detectionController: ObjectDetectionController,
@@ -124,8 +119,8 @@ class VisualServoingController(
                             .coerceIn(-maxRotationStep, maxRotationStep)
                             .toDouble()
                         Log.i(TAG, ">>> ROTATE theta=%.3f rad (errX=%.3f)".format(theta, errX))
-                        movementController.cancelAndMove(x = 0.0, theta = theta)
-                        delay(500L)
+                        // Aspetta il completamento reale — niente delay fisso
+                        movementController.cancelAndMoveAwait(x = 0.0, theta = theta)
                     }
 
                     needsAdvance -> {
@@ -133,8 +128,8 @@ class VisualServoingController(
                             .coerceIn(-maxAdvanceStep, maxAdvanceStep)
                             .toDouble()
                         Log.i(TAG, ">>> ADVANCE dist=%.3f m (errArea=%.3f)".format(dist, errArea))
-                        movementController.cancelAndMove(x = dist, theta = 0.0)
-                        delay(700L)
+                        // Aspetta il completamento reale — niente delay fisso
+                        movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
                     }
 
                     else -> {
@@ -155,6 +150,7 @@ class VisualServoingController(
         trackingJob = null
         resetState()
     }
+
     // ── Selezione target ──────────────────────────────────────────────────────
 
     private fun selectTarget(boxes: List<BoundingBox>, label: String): BoundingBox? {
@@ -201,16 +197,5 @@ class VisualServoingController(
         lastTargetCx   = 0.5f
         lastTargetCy   = 0.5f
         isTargetLocked = false
-    }
-
-    fun debugInfo(boxes: List<BoundingBox>): String {
-        val target = boxes.firstOrNull { it.label.equals(targetLabel, ignoreCase = true) }
-        return if (target != null) {
-            val area = target.rect.width() * target.rect.height()
-            "[${target.source}] '${target.label}' cx=%.2f cy=%.2f area=%.3f score=%.0f%%"
-                .format(target.cx, target.cy, area, target.score * 100)
-        } else {
-            "Target '$targetLabel' NOT FOUND in ${boxes.size} detections"
-        }
     }
 }
