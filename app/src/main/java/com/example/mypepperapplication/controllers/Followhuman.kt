@@ -103,40 +103,89 @@ class FollowHuman(
     }
 
     private fun startLookAt() {
-        humanToFollow.async().headFrame.andThenCompose { frame ->
-            LookAtBuilder.with(qiContext)
-                .withFrame(frame)
-                .buildAsync()
-                .andThenCompose { lookAt ->
-                    lookAt.policy = LookAtMovementPolicy.HEAD_ONLY
-                    lookAt.async().run()
-                }
-        }.thenConsume { f ->
-            if (f.hasError()) {
-                Log.w(TAG, "LookAt error: ${f.errorMessage}")
+        if (lookAtFuture != null && !lookAtFuture!!.isDone) {
+            return
+        }
+        lookAtFuture = humanToFollow.async().headFrame
+            .andThenCompose { frame ->
+                LookAtBuilder.with(qiContext)
+                    .withFrame(frame)
+                    .buildAsync()
+                    .andThenCompose { lookAt ->
+
+                        lookAt.policy = LookAtMovementPolicy.HEAD_ONLY
+                        lookAt.async().run()
+                    }
             }
-            lookAtFuture = null
-        }.also { lookAtFuture = it }
+            .thenConsume { future ->
+                if (future.hasError()) {
+                    Log.w(TAG, "LookAt error: ${future.errorMessage}")
+                }
+                lookAtFuture = null
+                if (shouldFollowHuman.get()) {
+                    timer.schedule(300L) {
+                        startLookAt()
+                    }
+                }
+            }
     }
 
     // Timer 400ms — controlla flap prima della distanza
     private fun startDistanceTimer() {
+
         timer.scheduleAtFixedRate(0L, distanceCheckIntervalMs) {
-            // Controlla flap prima di tutto: se aperto il robot non può muoversi
+            if (!shouldFollowHuman.get()) {
+                return@scheduleAtFixedRate
+            }
             if (::chargingFlap.isInitialized && chargingFlap.state.open) {
+
                 Log.e(TAG, "Charging flap OPEN — stopping")
+
                 followHumanListener?.onChargingFlapOpen()
+
                 stop()
+
                 return@scheduleAtFixedRate
             }
 
             val dist = computeDistance() ?: return@scheduleAtFixedRate
+
             followHumanListener?.onDistanceToHumanChanged(dist)
 
+            // ─────────────────────────────────────
+            // CLOSE ENOUGH
+            // ─────────────────────────────────────
+
             if (dist < closeEnoughDistance) {
-                Log.i(TAG, "Close enough (%.2fm) — cancelling GoTo".format(dist))
-                goToFuture?.requestCancellation()
-                followHumanListener?.onCloseEnough()
+
+                val future = goToFuture
+
+                if (future != null && !future.isDone) {
+
+                    Log.i(TAG, "Close enough (%.2fm) — cancelling GoTo".format(dist))
+
+                    future.requestCancellation()
+
+                    followHumanListener?.onCloseEnough()
+                }
+
+                return@scheduleAtFixedRate
+            }
+
+            // ─────────────────────────────────────
+            // HUMAN FAR AGAIN
+            // ─────────────────────────────────────
+
+            val future = goToFuture
+
+            val noActiveGoTo =
+                future == null || future.isDone
+
+            if (noActiveGoTo) {
+
+                Log.i(TAG, "Human far again (%.2fm) — resume follow".format(dist))
+
+                startFollowingHuman(true)
             }
         }
     }
@@ -157,66 +206,107 @@ class FollowHuman(
     }
 
     private fun startFollowingHuman(useStraightLines: Boolean) {
-        val policy = if (useStraightLines)
-            PathPlanningPolicy.STRAIGHT_LINES_ONLY
-        else
-            PathPlanningPolicy.GET_AROUND_OBSTACLES
+
+        if (!shouldFollowHuman.get()) return
+
+        // Evita GoTo multipli contemporanei
+        if (goToFuture != null && !goToFuture!!.isDone) {
+            return
+        }
+
+        startLookAt()
+
+        val policy =
+            if (useStraightLines)
+                PathPlanningPolicy.STRAIGHT_LINES_ONLY
+            else
+                PathPlanningPolicy.GET_AROUND_OBSTACLES
 
         Log.i(TAG, "GoTo → straight=$useStraightLines stuck=$seemsStuck")
 
-        goToFuture = humanToFollow.async().headFrame.andThenCompose { frame ->
-            GoToBuilder.with(qiContext)
-                .withFrame(frame)
-                .withPathPlanningPolicy(policy)
-                .buildAsync()
-                .andThenCompose { goTo ->
-                    goTo.addOnStartedListener {
-                        if (isFollowingHuman.compareAndSet(false, true)) {
-                            followHumanListener?.onFollowingHuman()
+        goToFuture = humanToFollow.async().headFrame
+            .andThenCompose { frame ->
+
+                GoToBuilder.with(qiContext)
+                    .withFrame(frame)
+                    .withPathPlanningPolicy(policy)
+                    .buildAsync()
+                    .andThenCompose { goTo ->
+
+                        goTo.addOnStartedListener {
+
+                            if (isFollowingHuman.compareAndSet(false, true)) {
+                                followHumanListener?.onFollowingHuman()
+                            }
                         }
-                    }
-                    goTo.async().run()
-                }
-        }.thenConsume { f ->
-            when {
-                f.isSuccess -> {
-                    Log.i(TAG, "GoTo success")
-                    seemsStuck = false
-                    consecutiveErrors = 0
-                    maybeFollowHuman(true)
-                }
-                f.isCancelled -> {
-                    Log.i(TAG, "GoTo cancelled")
-                    seemsStuck = false
-                    consecutiveErrors = 0
-                    // Non ripartiamo — o è stop() o è il timer di "vicino"
-                }
-                f.hasError() -> {
-                    consecutiveErrors++
-                    Log.e(TAG, "GoTo error #$consecutiveErrors: ${f.errorMessage}")
 
-                    // Controlla flap sull'errore: se aperto notifica e fermati definitivamente
-                    if (::chargingFlap.isInitialized && chargingFlap.state.open) {
-                        Log.e(TAG, "Charging flap is OPEN — cannot move")
-                        followHumanListener?.onChargingFlapOpen()
-                        stop()
-                        return@thenConsume
+                        goTo.async().run()
+                    }
+            }
+            .thenConsume { future ->
+
+                goToFuture = null
+
+                when {
+
+                    future.isSuccess -> {
+
+                        Log.i(TAG, "GoTo success")
+
+                        seemsStuck = false
+                        consecutiveErrors = 0
                     }
 
-                    if (consecutiveErrors >= stuckThreshold) {
-                        seemsStuck = true
-                        followHumanListener?.onCantReachHuman()
+                    future.isCancelled -> {
+
+                        Log.i(TAG, "GoTo cancelled")
+
+                        seemsStuck = false
+                        consecutiveErrors = 0
                     }
 
-                    // Backoff: max 3s
-                    val delay = (consecutiveErrors * 500L).coerceAtMost(3000L)
-                    timer.schedule(delay) {
-                        // Alterna politica di path planning
-                        maybeFollowHuman(!useStraightLines)
+                    future.hasError() -> {
+
+                        consecutiveErrors++
+
+                        Log.e(
+                            TAG,
+                            "GoTo error #$consecutiveErrors: ${future.errorMessage}"
+                        )
+
+                        if (::chargingFlap.isInitialized &&
+                            chargingFlap.state.open
+                        ) {
+
+                            Log.e(TAG, "Charging flap is OPEN")
+
+                            followHumanListener?.onChargingFlapOpen()
+
+                            stop()
+
+                            return@thenConsume
+                        }
+
+                        if (consecutiveErrors >= stuckThreshold) {
+
+                            seemsStuck = true
+
+                            followHumanListener?.onCantReachHuman()
+                        }
+
+                        val delay =
+                            (consecutiveErrors * 500L)
+                                .coerceAtMost(3000L)
+
+                        timer.schedule(delay) {
+
+                            if (shouldFollowHuman.get()) {
+                                maybeFollowHuman(!useStraightLines)
+                            }
+                        }
                     }
                 }
             }
-        }
     }
 
     // Usa headFrame.computeTransform(robotFrame) per ottenere la traslazione 3D robot→umano.
