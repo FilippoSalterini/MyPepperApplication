@@ -36,28 +36,28 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
                 runOnUiThread { ui.updateForMode(mode) }
 
             override fun onFollowingHuman() =
-                runOnUiThread { ui.showToast("Seguendo l'umano…") }
+                runOnUiThread { ui.showToast("Following the human…") }
 
             override fun onCloseEnoughToHuman() =
-                runOnUiThread { ui.showToast("Sono vicino! Mi fermo.") }
+                runOnUiThread { ui.showToast("I'm close! I'll stop") }
 
             override fun onCantReachHuman() =
-                runOnUiThread { ui.showToast("Non riesco a raggiungere l'umano!") }
+                runOnUiThread { ui.showToast("I cannot reach the human!") }
 
             override fun onDistanceChanged(meters: Double) =
                 runOnUiThread { ui.updateDistance(meters) }
 
             override fun onServoingStarted(labels: List<String>) =
-                runOnUiThread { ui.showToast("Cerco: ${labels.joinToString(", ")}") }
+                runOnUiThread { ui.showToast("Searching: ${labels.joinToString(", ")}") }
 
             override fun onServoingStopped() =
-                runOnUiThread { ui.showToast("Visual Servoing fermato") }
+                runOnUiThread { ui.showToast("Visual Servoing stopped") }
 
             override fun onObjectReached(label: String, box: BoundingBox) =
-                runOnUiThread { ui.showToast("Oggetto trovato: $label") }
+                runOnUiThread { ui.showToast("Object found: $label") }
 
             override fun onObjectLost(labels: List<String>) =
-                runOnUiThread { ui.showToast("Oggetto perso: ${labels.joinToString(", ")}") }
+                runOnUiThread { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
         }
     )
 
@@ -69,9 +69,9 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
         ui = UiController(binding, this).apply {
             onFollowHuman = {
-                ui.showToast("Cercando umano…")
+                ui.showToast("Searching the human…")
                 robotManager.startFollowHumanAutoDetect(
-                    onNoHumanFound = { runOnUiThread { ui.showToast("Nessun umano rilevato") } }
+                    onNoHumanFound = { runOnUiThread { ui.showToast("No human detected") } }
                 )
             }
             onStopFollowHuman = { robotManager.stopFollowHuman() }

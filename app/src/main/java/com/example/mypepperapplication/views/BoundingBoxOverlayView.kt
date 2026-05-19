@@ -60,7 +60,7 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
         if (imgW > 0 && imgH > 0) {
             val incomingRatio = imgW.toFloat() / imgH
             if(Math.abs(incomingRatio - imageRatio) > 0.01f)
-                Log.w("BoundingBoxOverlayView", "Ratio Mismatch: atteso $imageRatio, ricevuto $incomingRatio")
+                Log.w("BoundingBoxOverlayView", "Ratio Mismatch: waited $imageRatio, received $incomingRatio")
         }
         this.boxes = boxes
         invalidate()

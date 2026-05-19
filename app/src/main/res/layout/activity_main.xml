@@ -5,22 +5,22 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- LAYER 0: Camera preview fullscreen -->
+    <!-- Camera preview fullscreen -->
     <ImageView
         android:id="@+id/ivCameraPreview"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="#111111"
-        android:scaleType="fitCenter" />
+        android:scaleType="centerCrop" />
 
-    <!-- LAYER 1: Bounding box overlay -->
+    <!-- Bounding box overlay -->
     <com.example.mypepperapplication.views.BoundingBoxOverlayView
         android:id="@+id/overlayView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/transparent" />
 
-    <!-- LAYER 2: Top status bar -->
+    <!-- Top status bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -61,7 +61,7 @@
 
     </LinearLayout>
 
-    <!-- LAYER 3: Bottom control bar -->
+    <!-- Bottom control bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -73,7 +73,7 @@
         android:paddingTop="12dp"
         android:paddingBottom="12dp">
 
-        <!-- Riga 1: Spinner selezione label oggetto -->
+        <!-- Spinner selection label object -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -84,7 +84,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Oggetto:"
+                android:text="Object:"
                 android:textColor="#CCCCCC"
                 android:textSize="13sp"
                 android:layout_marginEnd="10dp" />
@@ -92,14 +92,14 @@
             <Spinner
                 android:id="@+id/spinnerLabel"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:background="#333333"
                 android:popupBackground="#222222" />
 
         </LinearLayout>
 
-        <!-- Riga 2: Pulsanti -->
+        <!-- Botton -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

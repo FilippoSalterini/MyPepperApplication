@@ -66,7 +66,7 @@ class RobotManager(
         qiContext = ctx
         movementController.onRobotReady(ctx)
         cameraController.onRobotReady(ctx)
-        servoingController.onRobotReady(ctx)
+        servoingController.onRobotReady()
         Log.i(TAG, "Robot ready")
     }
 

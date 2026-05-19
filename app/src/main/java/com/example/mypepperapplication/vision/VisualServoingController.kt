@@ -2,7 +2,6 @@ package com.example.mypepperapplication.vision
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.aldebaran.qi.sdk.QiContext
 import com.example.mypepperapplication.controllers.PepperMovementController
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
@@ -51,7 +50,7 @@ class VisualServoingController(
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var trackingJob: Job? = null
 
-    fun onRobotReady(ctx: QiContext) { Log.d(TAG, "Robot ready.") }
+    fun onRobotReady() { Log.d(TAG, "Robot ready.") }
     fun onRobotLost() { stopTracking() }
 
     fun startTracking(
@@ -59,7 +58,7 @@ class VisualServoingController(
         detectionController: ObjectDetectionController,
         labels: List<String>
     ) {
-        require(labels.isNotEmpty()) { "labels non può essere vuoto" }
+        require(labels.isNotEmpty()) { "labels cannot be empty" }
         stopTracking()
         Log.i(TAG, "Visual servoing started. Targets=$labels")
 
@@ -89,9 +88,9 @@ class VisualServoingController(
 
                 if (target == null) {
                     missedFrames++
-                    Log.d(TAG, "Nessun target trovato ($missedFrames/$maxMissedFrames) labels=$labels")
+                    Log.d(TAG, "No target detected ($missedFrames/$maxMissedFrames) labels=$labels")
                     if (missedFrames >= maxMissedFrames) {
-                        Log.w(TAG, "Target perso — stop")
+                        Log.w(TAG, "Target lost — stop")
                         movementController.stopMovement()
                         listener?.onObjectLost(labels)
                         break
@@ -113,7 +112,7 @@ class VisualServoingController(
                     val theta = (-kpRotation * errX)
                         .coerceIn(-maxRotationStep, maxRotationStep)
                         .toDouble()
-                    Log.i(TAG, "FASE 1 RUOTA theta=%.3f (errX=%.3f)".format(theta, errX))
+                    Log.i(TAG, "PHASE 1 ROTATE theta=%.3f (errX=%.3f)".format(theta, errX))
                     movementController.moveNonBlocking(theta = theta)
                     delay(cycleDelayMs)
                     continue
@@ -123,24 +122,24 @@ class VisualServoingController(
                 if (errArea > areaDeadzone) {
                     val rawStep = kpForward * errArea
                     if (rawStep < minAdvanceStep) {
-                        Log.i(TAG, "Passo troppo piccolo — TARGET RAGGIUNTO [${target.label}]")
+                        Log.i(TAG, "Step too small — TARGET REACHED [${target.label}]")
                         movementController.stopMovement()
                         listener?.onObjectReached(target.label, target)
                         break
                     }
                     val dist = rawStep.coerceAtMost(maxAdvanceStep).toDouble()
-                    Log.i(TAG, "FASE 2 AVANZA dist=%.3f m (errArea=%.3f)".format(dist, errArea))
+                    Log.i(TAG, "PHASE 2 ADVANCE dist=%.3f m (errArea=%.3f)".format(dist, errArea))
                     movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
                     continue  //ogni passo dopo torna a fase 1  cioè centra - TODO - DELAY
                 }
-                Log.i(TAG, "TARGET RAGGIUNTO: [${target.label}] cx=%.2f area=%.4f"
+                Log.i(TAG, "TARGET REACHED: [${target.label}] cx=%.2f area=%.4f"
                     .format(target.cx, rawArea))
                 movementController.stopMovement()
                 listener?.onObjectReached(target.label, target)
                 break
             }
 
-            Log.i(TAG, "Tracking loop terminato.")
+            Log.i(TAG, "Tracking loop finished.")
         }
     }
     fun stopTracking() {

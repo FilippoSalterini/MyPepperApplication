@@ -114,7 +114,7 @@ class FollowHuman(
                 Log.w(TAG, "LookAt error: ${f.errorMessage}")
             }
             lookAtFuture = null
-        }.also { lookAtFuture = it as? Future<Void> }
+        }.also { lookAtFuture = it }
     }
 
     // Timer 400ms

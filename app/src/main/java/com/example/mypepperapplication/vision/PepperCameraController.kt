@@ -44,7 +44,7 @@ class PepperCameraController {
     //API pubblica
     fun takeSinglePicture(callback: FrameCallback) {
         val ctx = qiContext ?: run {
-            Log.e(TAG, "takeSinglePicture: qiContext null — robot non connesso?")
+            Log.e(TAG, "takeSinglePicture: qiContext null — robot not connected?")
             return
         }
         if (!captureInProgress.compareAndSet(false, true)) {
@@ -96,14 +96,14 @@ class PepperCameraController {
                 formatDiagnosticDone = true
                 val expectedRgb888 = 640 * 480 * 3   // 921.600
                 val expectedRgb888_320 = 320 * 240 * 3 // 230.400
-                Log.i(TAG, "=== FORMATO CAMERA DIAGNOSTICO ===")
+                Log.i(TAG, "=== DIAGNOSTIC CAMERA FORMAT ===")
                 Log.i(TAG, "Buffer size: ${bytes.size} byte")
-                Log.i(TAG, "Atteso RGB888 640x480: $expectedRgb888 | 320x240: $expectedRgb888_320")
-                Log.i(TAG, "Primi 4 byte (JPEG inizia con FF D8 FF): ${bytes.take(4).map { "%02X".format(it) }}")
+                Log.i(TAG, "Waited RGB888 640x480: $expectedRgb888 | 320x240: $expectedRgb888_320")
+                Log.i(TAG, "First 4 bytes (JPEG starts with FF D8 FF): ${bytes.take(4).map { "%02X".format(it) }}")
                 if (bytes.size == expectedRgb888 || bytes.size == expectedRgb888_320) {
-                    Log.w(TAG, "ATTENZIONE: sembra RGB888 raw — decodeByteArray potrebbe restituire null!")
+                    Log.w(TAG, "WARNING: This looks like raw RGB888 — decodeByteArray may return null!")
                 } else {
-                    Log.i(TAG, "Probabile JPEG compresso — decodeByteArray dovrebbe funzionare.")
+                    Log.i(TAG, "Probably compressed JPEG — decodeByteArray should work.")
                 }
             }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
