@@ -15,14 +15,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.schedule
 import kotlin.concurrent.scheduleAtFixedRate
 import kotlin.math.sqrt
+// ===========================================================================
+// FOLLOW HUMAN
+// ===========================================================================
+
+/*Serve per gestire il comportamente 'follow human' + goTo ciclico con
+rilevamento degli ostacoli
+*/
 
 class FollowHuman(
     private val qiContext: QiContext,
     private val humanToFollow: Human,
     private val followHumanListener: FollowHumanListener? = null
 ) {
-
-    // ── Interfaccia callback ──────────────────────────────────────────────────
 
     interface FollowHumanListener {
         /** Il robot ha iniziato a muoversi verso l'umano */
@@ -38,8 +43,6 @@ class FollowHuman(
     companion object {
         private const val TAG = "FollowHuman"
     }
-
-    // ── Configurazione pubblica ───────────────────────────────────────────────
 
     /** Distanza minima (m) sotto la quale il robot si ferma */
     var closeEnoughDistance: Double = 1.0
@@ -200,9 +203,9 @@ class FollowHuman(
             }
         }
     }
-
-    // ── Distanza euclidea robot→umano ─────────────────────────────────────────
-
+    // Usa headFrame.computeTransform(robotFrame) per ottenere la traslazione 3D robot→umano.
+    // Calcola sqrt(x² + y²) — distanza sul piano orizzontale (ignora z = altezza).
+    // Ritorna null se i frame non sono ancora stati inizializzati (guard con isInitialized).
     private fun computeDistance(): Double? {
         if (!::headFrame.isInitialized || !::robotFrame.isInitialized) return null
         return try {
@@ -213,8 +216,6 @@ class FollowHuman(
             null
         }
     }
-
-    // ── Reset ─────────────────────────────────────────────────────────────────
 
     private fun resetInternalState() {
         seemsStuck        = false

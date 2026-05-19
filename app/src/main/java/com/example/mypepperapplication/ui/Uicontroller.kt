@@ -9,7 +9,13 @@ import android.widget.Toast
 import com.example.mypepperapplication.RobotMode
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.vision.BoundingBox
+// ===========================================================================
+// UI CONTROLLER
+// ===========================================================================
 
+/*
+Gestisce tutta la logica UI: spinner, pulsanti, overlay, toast, status bar.
+ */
 private const val TAG = "UiController"
 
 
@@ -55,7 +61,7 @@ class UiController(
         binding.btnSnapshot.setOnClickListener { onSnapshot?.invoke() }
 
         binding.btnFollowHuman.setOnClickListener {
-            // Il testo del pulsante riflette lo stato corrente
+            //testo pulsante -> tasto corrente
             if (binding.btnFollowHuman.tag == RobotMode.FOLLOW_HUMAN) {
                 onStopFollowHuman?.invoke()
             } else {

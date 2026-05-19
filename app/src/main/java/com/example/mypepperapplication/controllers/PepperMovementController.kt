@@ -8,7 +8,13 @@ import com.aldebaran.qi.sdk.builder.TransformBuilder
 import com.aldebaran.qi.sdk.`object`.geometry.Transform
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+// ===========================================================================
+// PEPPER MOVEMENT CONTROLLER
+// ===========================================================================
 
+/* Wrapper per i movimenti di traslazione e rotazione del robot utilizzando goTo
+e freeFrame
+*/
 private const val TAG = "PepperMovement"
 
 class PepperMovementController {
@@ -25,7 +31,10 @@ class PepperMovementController {
         stopMovement()
         qiContext = null
     }
-
+    // Crea un FreeFrame relativo al robotFrame corrente con la rotazione theta (radianti).
+    // Lancia GoTo in modo asincrono e ritorna subito (non-blocking).
+    // Cancella il movimento precedente prima di lanciare il nuovo (evita accodamento).
+    // Usato dal VisualServoingController per le rotazioni di centraggio (fase 1).
     fun moveNonBlocking(theta: Double) {
         if (theta == 0.0) return
         val ctx = qiContext ?: run {
@@ -55,7 +64,10 @@ class PepperMovementController {
             }
         }
     }
-
+    // Versione sospendente (coroutine) di moveNonBlocking.
+    // Attende il completamento del GoTo prima di ritornare — usato per gli avanzamenti (fase 2).
+    // In caso di errore aspetta 300ms e poi riprende (evita loop infiniti veloci).
+    // cont.invokeOnCancellation cancella il Future QiSDK se la coroutine viene cancellata.
     suspend fun cancelAndMoveAwait(x: Double = 0.0, theta: Double = 0.0) {
         if (x == 0.0 && theta == 0.0) return
         val ctx = qiContext ?: run {

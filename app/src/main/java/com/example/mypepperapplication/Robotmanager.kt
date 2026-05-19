@@ -10,8 +10,13 @@ import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
 import java.util.concurrent.atomic.AtomicReference
-
-// orschestratore centrale che gestisce il follow human e visual servoing
+// =============================================================================
+// RobotManager
+// =============================================================================
+/* Orchestratore centrale che tiene traccia della modalità corrente e serve
+per coordinare tutti i sotto controller.
+Definisce quasi tutti gli eventi che la MainActivity deve gestire.
+ */
 class RobotManager(
     private val listener: RobotManagerListener? = null
 ) {
@@ -51,7 +56,8 @@ class RobotManager(
     }
 
     private var followHuman: FollowHuman? = null
-
+    // Usa AtomicReference<RobotMode> per garantire thread-safety nella lettura/scrittura del modo.
+    // Il QiSDK chiama i suoi callback su thread diversi dal main thread.
     private val currentMode = AtomicReference(RobotMode.IDLE)
     private var qiContext: QiContext? = null
     val mode: RobotMode get() = currentMode.get()
@@ -85,7 +91,9 @@ class RobotManager(
             startFollowHuman(humans.first())
         }
     }
-
+    //Utilizza HumanAwareness.async().humansAround per ottenere una lista di umani rilevati
+    // lista vuota -> onNoHUmanFOund, altrimenti segue primo umano rilevato
+    //TODO: FIXA IN MODO CHE SCELGA UMANO PIU VICINO OPPURE SI LOCCKI CON UN UMANO IN EVIDENZA
     fun startFollowHuman(human: Human) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
         if (!switchMode(RobotMode.FOLLOW_HUMAN)) return
@@ -128,9 +136,6 @@ class RobotManager(
         setMode(RobotMode.IDLE)
         listener?.onServoingStopped()
     }
-
-    // ── Stop globale ──────────────────────────────────────────────────────────
-
     fun stopAll() {
         when (currentMode.get()) {
             RobotMode.FOLLOW_HUMAN    -> { followHuman?.stop(); followHuman = null }
@@ -141,9 +146,9 @@ class RobotManager(
         movementController.stopMovement()
         Log.i(TAG, "stopAll")
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
+    // Prima di entrare in un nuovo modo, ferma il modo precedente (stop del follow o del servoing).
+    // Poi chiama setMode() che aggiorna l'AtomicReference e notifica il listener.
+    // Ritorna false se il robot è già nel modo richiesto (evita doppio avvio).
     private fun switchMode(newMode: RobotMode): Boolean {
         val old = currentMode.get()
         if (old == newMode) { Log.w(TAG, "Already in $newMode"); return false }

@@ -9,6 +9,9 @@ import android.util.AttributeSet
 import android.util.Log
 import android.view.View
 import com.example.mypepperapplication.vision.BoundingBox
+// ===========================================================================
+// BOUNDING BOX OVERLAY VIEW
+// ===========================================================================
 
 /**
  * BoundingBoxOverlayView — disegna bounding boxes sulla preview camera.

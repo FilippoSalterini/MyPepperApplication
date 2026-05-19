@@ -15,7 +15,19 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+// ===========================================================================
+// OBJECT DETECTION CONTROLLER
+// ===========================================================================
 
+/* Serve per inviare frame JPEG al server YOLOv8n su pc e decodifica le bounding box
+normalizzate [0,1]
+*/
+
+/* TODO Ogni chiamata a detect() crea un nuovo CoroutineScope non gestito.
+Considera di usare uno scope di livello
+classe con Job() per poter cancellare tutte le richieste in volo.
+jpegQuality = 70 è un buon compromesso. Se la rete è lenta puoi abbassarlo a 50.
+*/
 private const val TAG = "ObjectDetection"
 /**
  * Bounding box normalizzata [0,1] + metadati del rilevamento.
@@ -32,8 +44,6 @@ class ObjectDetectionController {
     fun interface DetectionCallback {
         fun onDetections(boxes: List<BoundingBox>, imageWidth: Int, imageHeight: Int)
     }
-
-    // Configurazione ───────────────────────────────────────────────────────
     //URL da modificare con IP corretta
     var serverUrl: String = "http://10.186.13.27:8000"
 

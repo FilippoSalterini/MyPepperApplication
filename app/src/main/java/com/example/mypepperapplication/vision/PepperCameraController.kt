@@ -13,7 +13,13 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
+// ===========================================================================
+// PEPPER CAMERA CONTROLLER
+// ===========================================================================
 
+/*
+Gestisce la fotocamera di pepper tramite il takepicture del qisdk builder
+ */
 private const val TAG = "PepperCamera"
 
 class PepperCameraController {

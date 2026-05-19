@@ -7,7 +7,23 @@ import com.example.mypepperapplication.controllers.PepperMovementController
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
 import kotlin.math.abs
+// ===========================================================================
+// VISUAL SERVOING CONTROLLER
+// ===========================================================================
 
+/*
+Costituisce il loop di controllo visivo : Scatta > Detecta > Centra/Ruota > avanza > Ripete
+ 1. SCATTA: sospende finché PepperCameraController non ha il bitmap pronto.
+ 2. DETECT: sospende finché ObjectDetectionController non ha le box pronte.
+ 3. FILTRA: prende il candidato con score massimo tra le label richieste.
+ 4. FASE 1 — CENTRA: se |cx − 0.5| > horizontalDeadzone, ruota di theta = −kp * errX
+    e ricomincia dal passo 1 (continue).
+ 5. FASE 2 — AVANZA: se targetArea − area > areaDeadzone, avanza di kp * errArea
+    clampato in [minAdvanceStep, maxAdvanceStep]. Se il passo calcolato
+    < minAdvanceStep → TARGET RAGGIUNTO.
+ 6. Se entrambe le zone morte sono soddisfatte → TARGET RAGGIUNTO.
+ 7. missedFrames: se nessun target per maxMissedFrames cicli → onObjectLost().
+ */
 private const val TAG = "VisualServoing"
 class VisualServoingController(
     private val movementController: PepperMovementController
@@ -26,7 +42,7 @@ class VisualServoingController(
     var kpForward:          Float = 0.6f
     var maxAdvanceStep:     Float = 0.20f
     var minAdvanceStep:     Float = 0.05f
-    var targetArea:         Float = 0.20f
+    var targetArea:         Float = 0.20f //vedi calibrazione oggetto
     var areaDeadzone:       Float = 0.03f
 
     var maxMissedFrames:    Int   = 10
@@ -115,7 +131,7 @@ class VisualServoingController(
                     val dist = rawStep.coerceAtMost(maxAdvanceStep).toDouble()
                     Log.i(TAG, "FASE 2 AVANZA dist=%.3f m (errArea=%.3f)".format(dist, errArea))
                     movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
-                    continue  //ogni passo dopo torna a fase 1  cioè centra - TODO: VEDI SE TROPPO DELAY
+                    continue  //ogni passo dopo torna a fase 1  cioè centra - TODO - DELAY
                 }
                 Log.i(TAG, "TARGET RAGGIUNTO: [${target.label}] cx=%.2f area=%.4f"
                     .format(target.cx, rawArea))

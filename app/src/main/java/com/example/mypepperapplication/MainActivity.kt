@@ -9,9 +9,17 @@ import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.ui.UiController
 import com.example.mypepperapplication.vision.BoundingBox
+// ================================================================
+// Main Activity
+// ================================================================
 
+/* Entry point Android, gestisce i lifecycle callbacks quindi vita
+android e QISDK - Delega tutto a RobotManager e UiController
+ */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
-
+    // DETECTION_SERVER_URL: indirizzo IP del PC che esegue il server YOLOv8.
+    // USE_MOCK_FALLBACK: se true, in caso di errore ritorna lista vuota anziché crashare.
+    // Modifica DETECTION_SERVER_URL con l'IP della tua macchina sulla rete locale.
     companion object {
         private const val TAG = "MainActivity"
         private const val DETECTION_SERVER_URL = "http://10.186.13.27:8000"
@@ -53,8 +61,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         }
     )
 
-    // ── Android lifecycle ─────────────────────────────────────────────────────
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -89,8 +95,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         QiSDK.unregister(this, this)
         super.onDestroy()
     }
-
-    // ── QiSDK lifecycle ───────────────────────────────────────────────────────
 
     override fun onRobotFocusGained(ctx: QiContext) {
         Log.d(TAG, "onRobotFocusGained")
