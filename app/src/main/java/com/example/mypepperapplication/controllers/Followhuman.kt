@@ -47,7 +47,7 @@ class FollowHuman(
     }
 
     /** Distanza minima (m) sotto la quale il robot si ferma */
-    var closeEnoughDistance: Double = 1.0
+    var closeEnoughDistance: Double = 0.8
 
     /** Intervallo (ms) del timer di monitoraggio distanza — default 400ms */
     var distanceCheckIntervalMs: Long = 400L
