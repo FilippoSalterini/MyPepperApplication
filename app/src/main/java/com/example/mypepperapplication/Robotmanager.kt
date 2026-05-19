@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 // RobotManager
 // =============================================================================
 /**
- * Orchestratore centrale
+ * Orchestratore centrale di logica robot:
  *   - startFollowHuman / stopFollowHuman
  *   - startVisualServoing / stopVisualServoing
  *   - processSnapshot
@@ -35,16 +35,16 @@ class RobotManager(
         fun onServoingStopped()
         fun onObjectReached(label: String, box: BoundingBox)
         fun onObjectLost(labels: List<String>)
+        fun onChargingFlapOpen()
     }
 
     companion object {
         private const val TAG = "RobotManager"
     }
 
-    // Controller interni: privati — l'Activity non li deve conoscere.
     private val movementController  = PepperMovementController()
     private val cameraController    = PepperCameraController()
-    val detectionController = ObjectDetectionController()   // rimane interno; esposto solo per config in onRobotFocusGained
+    val detectionController = ObjectDetectionController()
 
     private val servoingController = VisualServoingController(movementController).also {
         it.listener = object : VisualServoingController.VisualServoingListener {
@@ -67,11 +67,6 @@ class RobotManager(
     private var qiContext: QiContext? = null
 
     val mode: RobotMode get() = currentMode.get()
-
-    // ----------------------------------------------------------------
-    // Lifecycle
-    // ----------------------------------------------------------------
-
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
         movementController.onRobotReady(ctx)
@@ -88,10 +83,6 @@ class RobotManager(
         qiContext = null
         Log.i(TAG, "Robot lost")
     }
-
-    // ----------------------------------------------------------------
-    // Public API  (tutto ciò che MainActivity può chiamare)
-    // ----------------------------------------------------------------
 
     fun startFollowHumanAutoDetect(onNoHumanFound: (() -> Unit)? = null) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
@@ -118,6 +109,7 @@ class RobotManager(
                 override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
                 override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
                 override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
+                override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen() }
                 override fun onDistanceToHumanChanged(d: Double) { listener?.onDistanceChanged(d) }
             }
         ).also { it.start() }
@@ -150,11 +142,6 @@ class RobotManager(
         setMode(RobotMode.IDLE)
         listener?.onServoingStopped()
     }
-
-    /**
-     * Facade per scattare una foto e rilevare oggetti.
-     * L'Activity passa solo due lambda; non conosce cameraController né detectionController.
-     */
     fun processSnapshot(
         onBitmap: (Bitmap) -> Unit,
         onDetection: (boxes: List<com.example.mypepperapplication.vision.BoundingBox>, w: Int, h: Int) -> Unit
@@ -177,11 +164,6 @@ class RobotManager(
         movementController.stopMovement()
         Log.i(TAG, "stopAll")
     }
-
-    // ----------------------------------------------------------------
-    // Internal mode management
-    // ----------------------------------------------------------------
-
     private fun switchMode(newMode: RobotMode): Boolean {
         val old = currentMode.get()
         if (old == newMode) { Log.w(TAG, "Already in $newMode"); return false }

@@ -14,18 +14,21 @@ import com.example.mypepperapplication.vision.BoundingBox
 // ================================================================
 // Main Activity
 // ================================================================
-
 /**
- * Responsabilità:
+ * Entry point Android.
+ * Responsabilità (e SOLO queste):
  *   1. Lifecycle Android + QiSDK
  *   2. Creazione di UiController e RobotManager
  *   3. Wiring UI → RobotManager tramite [bindUiToRobot]
+ *
+ * Tutto il resto è delegato: logica robot → RobotManager, logica UI → UiController.
  */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     companion object {
         private const val TAG = "MainActivity"
     }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var ui: UiController
     private lateinit var robotManager: RobotManager
@@ -45,6 +48,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         QiSDK.unregister(this, this)
         super.onDestroy()
     }
+
     override fun onRobotFocusGained(ctx: QiContext) {
         Log.d(TAG, "onRobotFocusGained")
 
@@ -99,6 +103,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         override fun onServoingStopped()                    = ui { ui.showToast("Visual Servoing stopped") }
         override fun onObjectReached(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
         override fun onObjectLost(labels: List<String>)     = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
+        override fun onChargingFlapOpen()                   = ui { ui.showToast("Charging flap open — movement blocked") }
     }
     private fun ui(block: () -> Unit) = runOnUiThread(block)
 }
