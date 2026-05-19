@@ -5,7 +5,6 @@ import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.builder.GoToBuilder
 import com.aldebaran.qi.sdk.builder.TransformBuilder
-import com.aldebaran.qi.sdk.`object`.actuation.GoTo
 import com.aldebaran.qi.sdk.`object`.geometry.Transform
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -19,7 +18,7 @@ class PepperMovementController {
 
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
-        Log.d(TAG, "Robot ready, autonomous abilities held.")
+        Log.d(TAG, "Robot ready.")
     }
 
     fun onRobotLost() {
@@ -27,105 +26,104 @@ class PepperMovementController {
         qiContext = null
     }
 
-//    fun cancelAndMove(x: Double = 0.0, theta: Double = 0.0) {
-//        if (x == 0.0 && theta == 0.0) {
-//            Log.i(TAG, "cancelAndMove called: no movement")
-//            return
-//        }
-//        val ctx = qiContext ?: run {
-//            Log.e(TAG, "cancelAndMove: QiContext NULL — robot non pronto!")
-//            return
-//        }
-//        Log.i(TAG, "cancelAndMove called: x=$x theta=$theta")
-//
-//        currentGoToFuture?.requestCancellation()
-//        currentGoToFuture = null
-//
-//        val transform: Transform = buildTransform(x, theta)
-//        val robotFrame = ctx.actuation.robotFrame()
-//        val targetFreeFrame = ctx.mapping.makeFreeFrame()
-//        targetFreeFrame.update(robotFrame, transform, 0L)
-//
-//        val goTo: GoTo = GoToBuilder.with(ctx)
-//            .withFrame(targetFreeFrame.frame())
-//            .build()
-//
-//        currentGoToFuture = goTo.async().run().thenConsume { future ->
-//            when {
-//                future.isSuccess  -> {
-//                    currentGoToFuture = null
-//                    Log.i(TAG, "GoTo completed ✓ x=$x theta=$theta")
-//                }
-//                future.isCancelled -> Log.i(TAG, "GoTo cancelled")
-//                future.hasError()  -> Log.e(TAG, "GoTo ERROR: ${future.errorMessage}")
-//            }
-//        }
-//    }
+    fun moveNonBlocking(theta: Double) {
+        if (theta == 0.0) return
+        val ctx = qiContext ?: run {
+            Log.e(TAG, "moveNonBlocking: QiContext NULL")
+            return
+        }
+        currentGoToFuture?.requestCancellation()
+        currentGoToFuture = null
 
-    //aspetta il completamento reale del GoTo
+        val transform  = TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
+        val robotFrame = ctx.actuation.robotFrame()
+        val freeFrame  = ctx.mapping.makeFreeFrame()
+        freeFrame.update(robotFrame, transform, 0L)
+
+        val future = GoToBuilder.with(ctx)
+            .withFrame(freeFrame.frame())
+            .build()
+            .async().run()
+
+        currentGoToFuture = future
+        future.thenConsume { f ->
+            currentGoToFuture = null
+            when {
+                f.isSuccess   -> Log.d(TAG, "Rotation ✓ theta=$theta")
+                f.isCancelled -> Log.d(TAG, "Rotation cancelled")
+                f.hasError()  -> Log.w(TAG, "Rotation error: ${f.errorMessage}")
+            }
+        }
+    }
 
     suspend fun cancelAndMoveAwait(x: Double = 0.0, theta: Double = 0.0) {
-        if (x == 0.0 && theta == 0.0) {
-            Log.i(TAG, "cancelAndMoveAwait: no movement")
-            return
-        }
+        if (x == 0.0 && theta == 0.0) return
         val ctx = qiContext ?: run {
-            Log.e(TAG, "cancelAndMoveAwait: QiContext NULL — robot non pronto!")
+            Log.e(TAG, "cancelAndMoveAwait: QiContext NULL")
             return
         }
-        Log.i(TAG, "cancelAndMoveAwait called: x=$x theta=$theta")
+        Log.i(TAG, "cancelAndMoveAwait: x=$x theta=$theta")
 
         currentGoToFuture?.requestCancellation()
         currentGoToFuture = null
 
-        val transform: Transform = buildTransform(x, theta)
+        val transform  = buildTransform(x, theta)
         val robotFrame = ctx.actuation.robotFrame()
-        val targetFreeFrame = ctx.mapping.makeFreeFrame()
-        targetFreeFrame.update(robotFrame, transform, 0L)
-
-        val goTo: GoTo = GoToBuilder.with(ctx)
-            .withFrame(targetFreeFrame.frame())
-            .build()
+        val freeFrame  = ctx.mapping.makeFreeFrame()
+        freeFrame.update(robotFrame, transform, 0L)
 
         suspendCancellableCoroutine { cont ->
-            val future = goTo.async().run()
+            val future = GoToBuilder.with(ctx)
+                .withFrame(freeFrame.frame())
+                .build()
+                .async().run()
             currentGoToFuture = future
 
             future.thenConsume { f ->
+                currentGoToFuture = null
                 when {
                     f.isSuccess -> {
-                        currentGoToFuture = null
-                        Log.i(TAG, "GoTo completed ✓ x=$x theta=$theta")
+                        Log.i(TAG, "cancelAndMoveAwait ✓ x=$x theta=$theta")
                         if (cont.isActive) cont.resume(Unit)
                     }
                     f.isCancelled -> {
-                        Log.i(TAG, "GoTo cancelled — loop può ripartire")
+                        Log.i(TAG, "cancelAndMoveAwait cancelled")
                         if (cont.isActive) cont.resume(Unit)
                     }
                     f.hasError() -> {
-                        Log.e(TAG, "GoTo ERROR: ${f.errorMessage}")
+                        Log.e(TAG, "cancelAndMoveAwait ERROR: ${f.errorMessage}")
                         Thread.sleep(300L)
-                        if (cont.isActive) cont.resume(Unit) // non bloccare il loop
+                        if (cont.isActive) cont.resume(Unit)
                     }
                 }
             }
-
-            cont.invokeOnCancellation {
-                future.requestCancellation()
-            }
+            cont.invokeOnCancellation { future.requestCancellation() }
         }
     }
+
+    // ── stopMovement ──────────────────────────────────────────────────────────
+
     fun stopMovement() {
         currentGoToFuture?.requestCancellation()
         currentGoToFuture = null
     }
+
+    // TODO: Questo blocco per implementazione spostamento tra stanze
+    // Da implementare con *NavigationController*
+    // Richiede: Mapping SDK, LocalizeAndMap, waypoint salvati a runtime.
+    //
+    // suspend fun goToWaypoint(name: String) {
+    //     val frame = waypointMap[name] ?: run {
+    //         Log.e(TAG, "Waypoint '$name' non trovato"); return
+    //     }
+    //     GoToBuilder.with(ctx).withFrame(frame).build().async().run() ...
+    // }
+
     private fun buildTransform(x: Double, theta: Double): Transform {
-        return if (x == 0.0 && theta != 0.0) {
-            TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
-        } else if (x != 0.0 && theta == 0.0) {
-            TransformBuilder.create().fromXTranslation(x)
-        } else {
-            TransformBuilder.create().from2DTransform(x, 0.0, theta)
+        return when {
+            x == 0.0     -> TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
+            theta == 0.0 -> TransformBuilder.create().fromXTranslation(x)
+            else         -> TransformBuilder.create().from2DTransform(x, 0.0, theta)
         }
     }
 }

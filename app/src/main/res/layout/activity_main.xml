@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- ── LAYER 0: Camera preview fullscreen ──────────────────────────── -->
+    <!-- LAYER 0: Camera preview fullscreen -->
     <ImageView
         android:id="@+id/ivCameraPreview"
         android:layout_width="match_parent"
@@ -13,14 +13,14 @@
         android:background="#111111"
         android:scaleType="fitCenter" />
 
-    <!-- ── LAYER 1: Bounding box overlay ───────────────────────────────── -->
+    <!-- LAYER 1: Bounding box overlay -->
     <com.example.mypepperapplication.views.BoundingBoxOverlayView
         android:id="@+id/overlayView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/transparent" />
 
-    <!-- ── LAYER 2: Top status bar ─────────────────────────────────────── -->
+    <!-- LAYER 2: Top status bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -32,18 +32,16 @@
         android:paddingTop="10dp"
         android:paddingBottom="10dp">
 
-        <!-- Mode status -->
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="● Idle"
+            android:text="Idle"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"
             android:gravity="center" />
 
-        <!-- Warning banner — visible only when needed -->
         <TextView
             android:id="@+id/tvWarning"
             android:layout_width="match_parent"
@@ -63,43 +61,77 @@
 
     </LinearLayout>
 
-    <!-- ── LAYER 3: Bottom control bar ─────────────────────────────────── -->
+    <!-- LAYER 3: Bottom control bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:orientation="horizontal"
-        android:gravity="center"
+        android:orientation="vertical"
         android:background="#CC000000"
         android:paddingStart="24dp"
         android:paddingEnd="24dp"
         android:paddingTop="12dp"
         android:paddingBottom="12dp">
 
-        <Button
-            android:id="@+id/btnSnapshot"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
+        <!-- Riga 1: Spinner selezione label oggetto -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:text="📷 Snapshot"
-            android:textColor="#FFFFFF" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="10dp">
 
-        <Button
-            android:id="@+id/btnFollowHuman"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:text="🚶 Follow Human" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Oggetto:"
+                android:textColor="#CCCCCC"
+                android:textSize="13sp"
+                android:layout_marginEnd="10dp" />
 
-        <Button
-            android:id="@+id/btnTrack"
-            android:layout_width="0dp"
+            <Spinner
+                android:id="@+id/spinnerLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="#333333"
+                android:popupBackground="#222222" />
+
+        </LinearLayout>
+
+        <!-- Riga 2: Pulsanti -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="🔍 Track Object" />
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/btnSnapshot"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="Snapshot"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/btnFollowHuman"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="Follow Human" />
+
+            <Button
+                android:id="@+id/btnTrack"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Track Object" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

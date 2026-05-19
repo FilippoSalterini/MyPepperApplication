@@ -3,144 +3,130 @@ package com.example.mypepperapplication.vision
 import android.graphics.Bitmap
 import android.util.Log
 import com.aldebaran.qi.sdk.QiContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
+import com.example.mypepperapplication.controllers.PepperMovementController
+import kotlinx.coroutines.*
 import kotlin.coroutines.resume
 import kotlin.math.abs
-import kotlin.math.sqrt
-import com.example.mypepperapplication.controllers.PepperMovementController
 
 private const val TAG = "VisualServoing"
-
 class VisualServoingController(
     private val movementController: PepperMovementController
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
 
+    interface VisualServoingListener {
+        fun onObjectReached(label: String, box: BoundingBox)
+        fun onObjectLost(labels: List<String>)
+    }
+    var listener: VisualServoingListener? = null
+
+    var kpRotation:         Float = 1.0f
+    var maxRotationStep:    Float = 0.25f
+    var horizontalDeadzone: Float = 0.07f
+
+    var kpForward:          Float = 0.6f
+    var maxAdvanceStep:     Float = 0.20f
+    var minAdvanceStep:     Float = 0.05f
+    var targetArea:         Float = 0.20f
+    var areaDeadzone:       Float = 0.03f
+
+    var maxMissedFrames:    Int   = 10
+    var cycleDelayMs:       Long  = 200L
+
+    private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var trackingJob: Job? = null
 
-    // Parametri
-    var targetLabel: String? = "person"
-    var kpRotation: Float = 1.5f
-    var kpForward: Float = 1.0f
-    var maxRotationStep: Float = 0.25f
-    var maxAdvanceStep: Float = 2f
-    var horizontalDeadzone: Float = 0.05f
-    var targetArea: Float = 0.5f
-    var areaDeadzone: Float = 0.04f
-    var maxMissedFrames: Int = 8
-    var cycleDelayMs: Long = 120L
-    var smoothingAlpha: Float = 0.4f
+    fun onRobotReady(ctx: QiContext) { Log.d(TAG, "Robot ready.") }
+    fun onRobotLost() { stopTracking() }
 
-    // Smoothing state
-    private var smoothCx: Float = 0.5f
-    private var smoothArea: Float = -1f
-
-    // target locking
-    private var lastTargetCx: Float = 0.5f
-    private var lastTargetCy: Float = 0.5f
-    private var isTargetLocked: Boolean = false
-
-    fun onRobotReady(ctx: QiContext) {
-        movementController.onRobotReady(ctx)
-        Log.d(TAG, "Robot ready.")
-    }
-    fun onRobotLost() {
-        stopTracking()
-        scope.coroutineContext.cancelChildren()
-        movementController.onRobotLost()
-    }
-    // ── API pubblica ──────────────────────────────────────────────────────────
     fun startTracking(
-        cameraController: PepperCameraController,
+        cameraController:    PepperCameraController,
         detectionController: ObjectDetectionController,
-        label: String = targetLabel ?: "person"
+        labels: List<String>
     ) {
-        targetLabel = label
+        require(labels.isNotEmpty()) { "labels non può essere vuoto" }
         stopTracking()
-        resetState()
-        Log.i(TAG, "Visual servoing started. Target='$label'")
+        Log.i(TAG, "Visual servoing started. Targets=$labels")
 
         trackingJob = scope.launch {
             var missedFrames = 0
 
             while (isActive) {
-                // 1. Scatta frame
+
+                // scatta
                 val bitmap: Bitmap = suspendCancellableCoroutine { cont ->
                     cameraController.takeSinglePicture { bmp, _ ->
                         if (cont.isActive) cont.resume(bmp)
                     }
                 }
 
-                // 2. Detection
+                // 2. Detection YOLO
                 val boxes: List<BoundingBox> = suspendCancellableCoroutine { cont ->
                     detectionController.detect(bitmap) { b, _, _ ->
                         if (cont.isActive) cont.resume(b)
                     }
                 }
 
-                // 3. Seleziona target
-                // TODO: introdurre un id sulla prima persona detectata e seguire quell'id
-                val target = selectTarget(boxes, label)
+                // miglior candidato con label score migliore
+                val target = boxes
+                    .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
+                    .maxByOrNull { it.score }
 
                 if (target == null) {
                     missedFrames++
-                    Log.d(TAG, "Target '$label' not found ($missedFrames/$maxMissedFrames)")
+                    Log.d(TAG, "Nessun target trovato ($missedFrames/$maxMissedFrames) labels=$labels")
                     if (missedFrames >= maxMissedFrames) {
-                        isTargetLocked = false
+                        Log.w(TAG, "Target perso — stop")
                         movementController.stopMovement()
+                        listener?.onObjectLost(labels)
+                        break
                     }
                     delay(cycleDelayMs)
                     continue
                 }
 
                 missedFrames = 0
-                updateSmoothing(target)
+                val errX    = target.cx - 0.5f
+                val rawArea = target.rect.width() * target.rect.height()
+                val errArea = targetArea - rawArea
 
-                // 4. Calcola errori
-                val errX    = smoothCx - 0.5f
-                val errArea = targetArea - smoothArea
+                Log.d(TAG, "[${target.label}] cx=%.2f area=%.4f errX=%.3f errArea=%.3f"
+                    .format(target.cx, rawArea, errX, errArea))
 
-                val needsRotation = abs(errX) > horizontalDeadzone
-                val needsAdvance  = abs(errArea) > areaDeadzone
-
-                Log.d(TAG, "errX=%.3f errArea=%.3f | rot=$needsRotation adv=$needsAdvance"
-                    .format(errX, errArea))
-
-                when {
-                    needsRotation -> {
-                        val theta = (-kpRotation * errX)
-                            .coerceIn(-maxRotationStep, maxRotationStep)
-                            .toDouble()
-                        Log.i(TAG, ">>> ROTATE theta=%.3f rad (errX=%.3f)".format(theta, errX))
-                        // Aspetta il completamento reale — niente delay fisso
-                        movementController.cancelAndMoveAwait(x = 0.0, theta = theta)
-                    }
-
-                    needsAdvance -> {
-                        val dist = (kpForward * errArea)
-                            .coerceIn(-maxAdvanceStep, maxAdvanceStep)
-                            .toDouble()
-                        Log.i(TAG, ">>> ADVANCE dist=%.3f m (errArea=%.3f)".format(dist, errArea))
-                        // Aspetta il completamento reale — niente delay fisso
-                        movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
-                    }
-
-                    else -> {
-                        Log.d(TAG, "→ Target centrato, fermo.")
-                        movementController.stopMovement()
-                    }
+                // centra - fase 1
+                if (abs(errX) > horizontalDeadzone) {
+                    val theta = (-kpRotation * errX)
+                        .coerceIn(-maxRotationStep, maxRotationStep)
+                        .toDouble()
+                    Log.i(TAG, "FASE 1 RUOTA theta=%.3f (errX=%.3f)".format(theta, errX))
+                    movementController.moveNonBlocking(theta = theta)
+                    delay(cycleDelayMs)
+                    continue
                 }
+
+                // 2 fase avvicinati
+                if (errArea > areaDeadzone) {
+                    val rawStep = kpForward * errArea
+                    if (rawStep < minAdvanceStep) {
+                        Log.i(TAG, "Passo troppo piccolo — TARGET RAGGIUNTO [${target.label}]")
+                        movementController.stopMovement()
+                        listener?.onObjectReached(target.label, target)
+                        break
+                    }
+                    val dist = rawStep.coerceAtMost(maxAdvanceStep).toDouble()
+                    Log.i(TAG, "FASE 2 AVANZA dist=%.3f m (errArea=%.3f)".format(dist, errArea))
+                    movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
+                    continue  //ogni passo dopo torna a fase 1  cioè centra - TODO: VEDI SE TROPPO DELAY
+                }
+                Log.i(TAG, "TARGET RAGGIUNTO: [${target.label}] cx=%.2f area=%.4f"
+                    .format(target.cx, rawArea))
+                movementController.stopMovement()
+                listener?.onObjectReached(target.label, target)
+                break
             }
+
+            Log.i(TAG, "Tracking loop terminato.")
         }
     }
-
     fun stopTracking() {
         if (trackingJob?.isActive == true) {
             trackingJob?.cancel()
@@ -148,54 +134,5 @@ class VisualServoingController(
             Log.i(TAG, "Visual servoing stopped.")
         }
         trackingJob = null
-        resetState()
-    }
-
-    // ── Selezione target ──────────────────────────────────────────────────────
-
-    private fun selectTarget(boxes: List<BoundingBox>, label: String): BoundingBox? {
-        val candidates = boxes.filter { it.label.equals(label, ignoreCase = true) }
-        if (candidates.isEmpty()) return null
-
-        return if (!isTargetLocked) {
-            candidates.maxByOrNull { it.score }!!.also { best ->
-                lastTargetCx   = best.cx
-                lastTargetCy   = best.cy
-                isTargetLocked = true
-                Log.d(TAG, "Target locked cx=%.2f cy=%.2f".format(lastTargetCx, lastTargetCy))
-            }
-        } else {
-            candidates.minByOrNull { box ->
-                val dx = box.cx - lastTargetCx
-                val dy = box.cy - lastTargetCy
-                sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-            }?.also { box ->
-                lastTargetCx = box.cx
-                lastTargetCy = box.cy
-            }
-        }
-    }
-
-    // ── Smoothing ─────────────────────────────────────────────────────────────
-
-    private fun updateSmoothing(target: BoundingBox) {
-        val rawArea = target.rect.width() * target.rect.height()
-        if (smoothArea < 0f) {
-            smoothCx   = target.cx
-            smoothArea = rawArea
-        } else {
-            smoothCx   = smoothingAlpha * target.cx + (1f - smoothingAlpha) * smoothCx
-            smoothArea = smoothingAlpha * rawArea   + (1f - smoothingAlpha) * smoothArea
-        }
-        Log.d(TAG, "Smooth cx=%.2f area=%.3f | Raw cx=%.2f area=%.3f"
-            .format(smoothCx, smoothArea, target.cx, rawArea))
-    }
-
-    private fun resetState() {
-        smoothCx       = 0.5f
-        smoothArea     = -1f
-        lastTargetCx   = 0.5f
-        lastTargetCy   = 0.5f
-        isTargetLocked = false
     }
 }
