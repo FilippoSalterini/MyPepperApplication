@@ -6,101 +6,55 @@ import androidx.appcompat.app.AppCompatActivity
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.QiSDK
 import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
+import com.example.mypepperapplication.config.AppConfig
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.ui.UiController
 import com.example.mypepperapplication.vision.BoundingBox
+
 // ================================================================
 // Main Activity
 // ================================================================
 
-/* Entry point Android, gestisce i lifecycle callbacks quindi vita
-android e QISDK - Delega tutto a RobotManager e UiController
+/**
+ * Responsabilità:
+ *   1. Lifecycle Android + QiSDK
+ *   2. Creazione di UiController e RobotManager
+ *   3. Wiring UI → RobotManager tramite [bindUiToRobot]
  */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
-    // DETECTION_SERVER_URL: indirizzo IP del PC che esegue il server YOLOv8.
-    // USE_MOCK_FALLBACK: se true, in caso di errore ritorna lista vuota anziché crashare.
-    // Modifica DETECTION_SERVER_URL con l'IP della tua macchina sulla rete locale.
+
     companion object {
         private const val TAG = "MainActivity"
-        private const val DETECTION_SERVER_URL = "http://10.186.13.27:8000"
-        private const val USE_MOCK_FALLBACK    = true
     }
-
     private lateinit var binding: ActivityMainBinding
     private lateinit var ui: UiController
-
-    private val robotManager = RobotManager(
-        listener = object : RobotManager.RobotManagerListener {
-
-            override fun onModeChanged(mode: RobotMode) =
-                runOnUiThread { ui.updateForMode(mode) }
-
-            override fun onFollowingHuman() =
-                runOnUiThread { ui.showToast("Following the human…") }
-
-            override fun onCloseEnoughToHuman() =
-                runOnUiThread { ui.showToast("I'm close! I'll stop") }
-
-            override fun onCantReachHuman() =
-                runOnUiThread { ui.showToast("I cannot reach the human!") }
-
-            override fun onDistanceChanged(meters: Double) =
-                runOnUiThread { ui.updateDistance(meters) }
-
-            override fun onServoingStarted(labels: List<String>) =
-                runOnUiThread { ui.showToast("Searching: ${labels.joinToString(", ")}") }
-
-            override fun onServoingStopped() =
-                runOnUiThread { ui.showToast("Visual Servoing stopped") }
-
-            override fun onObjectReached(label: String, box: BoundingBox) =
-                runOnUiThread { ui.showToast("Object found: $label") }
-
-            override fun onObjectLost(labels: List<String>) =
-                runOnUiThread { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
-        }
-    )
+    private lateinit var robotManager: RobotManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
         QiSDK.register(this, this)
 
-        ui = UiController(binding, this).apply {
-            onFollowHuman = {
-                ui.showToast("Searching the human…")
-                robotManager.startFollowHumanAutoDetect(
-                    onNoHumanFound = { runOnUiThread { ui.showToast("No human detected") } }
-                )
-            }
-            onStopFollowHuman = { robotManager.stopFollowHuman() }
-
-            onTrackObject = { label -> robotManager.startVisualServoing(label) }
-            onStopTracking = { robotManager.stopVisualServoing() }
-
-            onSnapshot = {
-                robotManager.cameraController.takeSinglePicture { bitmap, _ ->
-                    runOnUiThread { ui.showBitmap(bitmap) }
-                    robotManager.detectionController.detect(bitmap) { boxes, w, h ->
-                        runOnUiThread { ui.updateOverlay(boxes, w, h) }
-                    }
-                }
-            }
-        }
+        ui = UiController(binding, this)
     }
 
     override fun onDestroy() {
-        robotManager.stopAll()
+        if (::robotManager.isInitialized) robotManager.stopAll()
         QiSDK.unregister(this, this)
         super.onDestroy()
     }
-
     override fun onRobotFocusGained(ctx: QiContext) {
         Log.d(TAG, "onRobotFocusGained")
-        robotManager.onRobotReady(ctx)
-        robotManager.detectionController.serverUrl       = DETECTION_SERVER_URL
-        robotManager.detectionController.useMockFallback = USE_MOCK_FALLBACK
+
+        robotManager = RobotManager(listener = buildRobotListener()).apply {
+            onRobotReady(ctx)
+            detectionController.serverUrl       = AppConfig.DETECTION_SERVER_URL
+            detectionController.useMockFallback = AppConfig.USE_MOCK_FALLBACK
+        }
+
+        bindUiToRobot()
     }
 
     override fun onRobotFocusLost() {
@@ -110,6 +64,41 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     override fun onRobotFocusRefused(reason: String?) {
         Log.w(TAG, "onRobotFocusRefused: $reason")
-        runOnUiThread { ui.showToast("Robot focus refused: $reason") }
+        ui { ui.showToast("Robot focus refused: $reason") }
     }
+
+    private fun bindUiToRobot() {
+        ui.onFollowHuman = {
+            ui { ui.showToast("Searching the human…") }
+            robotManager.startFollowHumanAutoDetect(
+                onNoHumanFound = { ui { ui.showToast("No human detected") } }
+            )
+        }
+        ui.onStopFollowHuman = { robotManager.stopFollowHuman() }
+
+        ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
+        ui.onStopTracking = { robotManager.stopVisualServoing() }
+
+        // [5] Snapshot: nessun callback annidato in Activity.
+        //     Tutta la logica camera+detection è dentro RobotManager.processSnapshot().
+        ui.onSnapshot = {
+            robotManager.processSnapshot(
+                onBitmap    = { bitmap -> ui { ui.showBitmap(bitmap) } },
+                onDetection = { boxes, w, h -> ui { ui.updateOverlay(boxes, w, h) } }
+            )
+        }
+    }
+    private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
+
+        override fun onModeChanged(mode: RobotMode)         = ui { ui.updateForMode(mode) }
+        override fun onFollowingHuman()                     = ui { ui.showToast("Following the human…") }
+        override fun onCloseEnoughToHuman()                 = ui { ui.showToast("I'm close! I'll stop") }
+        override fun onCantReachHuman()                     = ui { ui.showToast("I cannot reach the human!") }
+        override fun onDistanceChanged(meters: Double)      = ui { ui.updateDistance(meters) }
+        override fun onServoingStarted(labels: List<String>)= ui { ui.showToast("Searching: ${labels.joinToString(", ")}") }
+        override fun onServoingStopped()                    = ui { ui.showToast("Visual Servoing stopped") }
+        override fun onObjectReached(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
+        override fun onObjectLost(labels: List<String>)     = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
+    }
+    private fun ui(block: () -> Unit) = runOnUiThread(block)
 }

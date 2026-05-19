@@ -1,5 +1,6 @@
 package com.example.mypepperapplication
 
+import android.graphics.Bitmap
 import android.util.Log
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.`object`.human.Human
@@ -10,12 +11,15 @@ import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
 import java.util.concurrent.atomic.AtomicReference
+
 // =============================================================================
 // RobotManager
 // =============================================================================
-/* Orchestratore centrale che tiene traccia della modalità corrente e serve
-per coordinare tutti i sotto controller.
-Definisce quasi tutti gli eventi che la MainActivity deve gestire.
+/**
+ * Orchestratore centrale
+ *   - startFollowHuman / stopFollowHuman
+ *   - startVisualServoing / stopVisualServoing
+ *   - processSnapshot
  */
 class RobotManager(
     private val listener: RobotManagerListener? = null
@@ -36,10 +40,13 @@ class RobotManager(
     companion object {
         private const val TAG = "RobotManager"
     }
-    val movementController  = PepperMovementController()
-    val cameraController    = PepperCameraController()
-    val detectionController = ObjectDetectionController()
-    val servoingController  = VisualServoingController(movementController).also {
+
+    // Controller interni: privati — l'Activity non li deve conoscere.
+    private val movementController  = PepperMovementController()
+    private val cameraController    = PepperCameraController()
+    val detectionController = ObjectDetectionController()   // rimane interno; esposto solo per config in onRobotFocusGained
+
+    private val servoingController = VisualServoingController(movementController).also {
         it.listener = object : VisualServoingController.VisualServoingListener {
             override fun onObjectReached(label: String, box: BoundingBox) {
                 Log.i(TAG, "Object reached: $label")
@@ -56,11 +63,14 @@ class RobotManager(
     }
 
     private var followHuman: FollowHuman? = null
-    // Usa AtomicReference<RobotMode> per garantire thread-safety nella lettura/scrittura del modo.
-    // Il QiSDK chiama i suoi callback su thread diversi dal main thread.
     private val currentMode = AtomicReference(RobotMode.IDLE)
     private var qiContext: QiContext? = null
+
     val mode: RobotMode get() = currentMode.get()
+
+    // ----------------------------------------------------------------
+    // Lifecycle
+    // ----------------------------------------------------------------
 
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
@@ -79,6 +89,10 @@ class RobotManager(
         Log.i(TAG, "Robot lost")
     }
 
+    // ----------------------------------------------------------------
+    // Public API  (tutto ciò che MainActivity può chiamare)
+    // ----------------------------------------------------------------
+
     fun startFollowHumanAutoDetect(onNoHumanFound: (() -> Unit)? = null) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
         ctx.humanAwareness.async().humansAround.andThenConsume { humans ->
@@ -89,11 +103,10 @@ class RobotManager(
             }
             Log.i(TAG, "Detected ${humans.size} human(s) — following nearest")
             startFollowHuman(humans.first())
+            // TODO: scegliere l'umano più vicino invece del primo in lista
         }
     }
-    //Utilizza HumanAwareness.async().humansAround per ottenere una lista di umani rilevati
-    // lista vuota -> onNoHUmanFOund, altrimenti segue primo umano rilevato
-    //TODO: FIXA IN MODO CHE SCELGA UMANO PIU VICINO OPPURE SI LOCCKI CON UN UMANO IN EVIDENZA
+
     fun startFollowHuman(human: Human) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
         if (!switchMode(RobotMode.FOLLOW_HUMAN)) return
@@ -102,10 +115,10 @@ class RobotManager(
             qiContext           = ctx,
             humanToFollow       = human,
             followHumanListener = object : FollowHuman.FollowHumanListener {
-                override fun onFollowingHuman()                        { listener?.onFollowingHuman() }
-                override fun onCloseEnough()                           { listener?.onCloseEnoughToHuman() }
-                override fun onCantReachHuman()                        { listener?.onCantReachHuman() }
-                override fun onDistanceToHumanChanged(d: Double)       { listener?.onDistanceChanged(d) }
+                override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
+                override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
+                override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
+                override fun onDistanceToHumanChanged(d: Double) { listener?.onDistanceChanged(d) }
             }
         ).also { it.start() }
         Log.i(TAG, "FollowHuman started")
@@ -117,8 +130,9 @@ class RobotManager(
         followHuman = null
         setMode(RobotMode.IDLE)
     }
-    fun startVisualServoing(label: String) =
-        startVisualServoing(listOf(label))
+
+    fun startVisualServoing(label: String) = startVisualServoing(listOf(label))
+
     fun startVisualServoing(labels: List<String>) {
         if (!switchMode(RobotMode.VISUAL_SERVOING)) return
         servoingController.startTracking(
@@ -136,6 +150,23 @@ class RobotManager(
         setMode(RobotMode.IDLE)
         listener?.onServoingStopped()
     }
+
+    /**
+     * Facade per scattare una foto e rilevare oggetti.
+     * L'Activity passa solo due lambda; non conosce cameraController né detectionController.
+     */
+    fun processSnapshot(
+        onBitmap: (Bitmap) -> Unit,
+        onDetection: (boxes: List<com.example.mypepperapplication.vision.BoundingBox>, w: Int, h: Int) -> Unit
+    ) {
+        cameraController.takeSinglePicture { bitmap, _ ->
+            onBitmap(bitmap)
+            detectionController.detect(bitmap) { boxes, w, h ->
+                onDetection(boxes, w, h)
+            }
+        }
+    }
+
     fun stopAll() {
         when (currentMode.get()) {
             RobotMode.FOLLOW_HUMAN    -> { followHuman?.stop(); followHuman = null }
@@ -146,9 +177,11 @@ class RobotManager(
         movementController.stopMovement()
         Log.i(TAG, "stopAll")
     }
-    // Prima di entrare in un nuovo modo, ferma il modo precedente (stop del follow o del servoing).
-    // Poi chiama setMode() che aggiorna l'AtomicReference e notifica il listener.
-    // Ritorna false se il robot è già nel modo richiesto (evita doppio avvio).
+
+    // ----------------------------------------------------------------
+    // Internal mode management
+    // ----------------------------------------------------------------
+
     private fun switchMode(newMode: RobotMode): Boolean {
         val old = currentMode.get()
         if (old == newMode) { Log.w(TAG, "Already in $newMode"); return false }
