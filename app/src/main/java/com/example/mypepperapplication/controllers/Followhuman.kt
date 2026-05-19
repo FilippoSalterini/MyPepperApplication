@@ -36,6 +36,8 @@ class FollowHuman(
         fun onCloseEnough()
         /** Il robot non riesce a raggiungere l'umano dopo vari tentativi */
         fun onCantReachHuman()
+        /** Flap di ricarica aperto → il robot non può muoversi */
+        fun onChargingFlapOpen()
         /** Aggiornamento distanza in metri */
         fun onDistanceToHumanChanged(distance: Double)
     }
@@ -65,7 +67,6 @@ class FollowHuman(
     private var goToFuture: Future<Void>? = null
     private var lookAtFuture: Future<Void>? = null
 
-    private var goToAttemptCounter = 0
     private var consecutiveErrors  = 0
     private var seemsStuck         = false
 
@@ -76,6 +77,7 @@ class FollowHuman(
         qiContext.actuation.async().robotFrame().andThenConsume { robotFrame = it }
         humanToFollow.async().headFrame.andThenConsume { headFrame = it }
     }
+
     fun start() {
         if (!shouldFollowHuman.compareAndSet(false, true)) {
             Log.w(TAG, "Already following a human — ignoring start()")
@@ -117,9 +119,17 @@ class FollowHuman(
         }.also { lookAtFuture = it }
     }
 
-    // Timer 400ms
+    // Timer 400ms — controlla flap prima della distanza
     private fun startDistanceTimer() {
         timer.scheduleAtFixedRate(0L, distanceCheckIntervalMs) {
+            // Controlla flap prima di tutto: se aperto il robot non può muoversi
+            if (::chargingFlap.isInitialized && chargingFlap.state.open) {
+                Log.e(TAG, "Charging flap OPEN — stopping")
+                followHumanListener?.onChargingFlapOpen()
+                stop()
+                return@scheduleAtFixedRate
+            }
+
             val dist = computeDistance() ?: return@scheduleAtFixedRate
             followHumanListener?.onDistanceToHumanChanged(dist)
 
@@ -184,8 +194,13 @@ class FollowHuman(
                 f.hasError() -> {
                     consecutiveErrors++
                     Log.e(TAG, "GoTo error #$consecutiveErrors: ${f.errorMessage}")
+
+                    // Controlla flap sull'errore: se aperto notifica e fermati definitivamente
                     if (::chargingFlap.isInitialized && chargingFlap.state.open) {
                         Log.e(TAG, "Charging flap is OPEN — cannot move")
+                        followHumanListener?.onChargingFlapOpen()
+                        stop()
+                        return@thenConsume
                     }
 
                     if (consecutiveErrors >= stuckThreshold) {
@@ -203,6 +218,7 @@ class FollowHuman(
             }
         }
     }
+
     // Usa headFrame.computeTransform(robotFrame) per ottenere la traslazione 3D robot→umano.
     // Calcola sqrt(x² + y²) — distanza sul piano orizzontale (ignora z = altezza).
     // Ritorna null se i frame non sono ancora stati inizializzati (guard con isInitialized).
@@ -220,7 +236,6 @@ class FollowHuman(
     private fun resetInternalState() {
         seemsStuck        = false
         consecutiveErrors = 0
-        goToAttemptCounter = 0
         isFollowingHuman.set(false)
     }
 }
