@@ -123,6 +123,11 @@ class RobotManager(
         Log.d(TAG, "Human lost — scheduling unlock in 3s")
         unlockTimerTask = object : java.util.TimerTask() {
             override fun run() {
+                if (currentMode.get() == RobotMode.FOLLOW_HUMAN && followHuman != null) {
+                    Log.d(TAG, "FollowHuman still active — extending lock")
+                    unlockTimerTask = null
+                    return
+                }
                 Log.i(TAG, "Unlock: human gone for 3s")
                 lockedHuman = null
                 unlockTimerTask = null
