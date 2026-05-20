@@ -45,7 +45,7 @@ class VisualServoingController(
     var areaDeadzone:       Float = 0.03f
 
     var maxMissedFrames:    Int   = 10
-    var cycleDelayMs:       Long  = 200L
+    var cycleDelayMs:       Long  = 200L //vedi frequenza
 
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var trackingJob: Job? = null

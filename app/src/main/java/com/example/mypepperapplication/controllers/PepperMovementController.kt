@@ -112,9 +112,6 @@ class PepperMovementController {
             cont.invokeOnCancellation { future.requestCancellation() }
         }
     }
-
-    // ── stopMovement ──────────────────────────────────────────────────────────
-
     fun stopMovement() {
         currentGoToFuture?.requestCancellation()
         currentGoToFuture = null

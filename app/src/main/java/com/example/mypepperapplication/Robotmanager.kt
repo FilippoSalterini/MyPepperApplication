@@ -61,6 +61,10 @@ class RobotManager(
             }
         }
     }
+    // locked human
+    private var lockedHuman: Human? = null
+    private var unlockTimerTask: java.util.TimerTask? = null
+    private val unlockTimer = java.util.Timer()
 
     private var followHuman: FollowHuman? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
@@ -89,15 +93,45 @@ class RobotManager(
         ctx.humanAwareness.async().humansAround.andThenConsume { humans ->
             if (humans.isNullOrEmpty()) {
                 Log.w(TAG, "No humans detected")
-                onNoHumanFound?.invoke()
+                if (lockedHuman != null) {
+                    scheduleUnlock(onNoHumanFound)
+                } else {
+                    onNoHumanFound?.invoke()
+                }
                 return@andThenConsume
             }
+            // C'è almeno un umano — cancella eventuale unlock pendente
+            unlockTimerTask?.cancel()
+            unlockTimerTask = null
+
+            // Se abbiamo già un target e stiamo seguendo → ignora, non fare nulla
+            if (lockedHuman != null && currentMode.get() == RobotMode.FOLLOW_HUMAN) {
+                Log.d(TAG, "Already following locked human — skipping")
+                return@andThenConsume
+            }
+
+            // Prima detection (o dopo unlock): scegli il più vicino e bloccalo
             Log.i(TAG, "Detected ${humans.size} human(s) — following nearest")
-            startFollowHuman(humans.first())
-            // TODO: scegliere l'umano più vicino invece del primo in lista
+            val nearest = humans.first() // TODO: ordinare per distanza se hai robotFrame
+            lockedHuman = nearest
+            startFollowHuman(nearest)
         }
     }
 
+    private fun scheduleUnlock(onNoHumanFound: (() -> Unit)?) {
+        if (unlockTimerTask != null) return
+        Log.d(TAG, "Human lost — scheduling unlock in 3s")
+        unlockTimerTask = object : java.util.TimerTask() {
+            override fun run() {
+                Log.i(TAG, "Unlock: human gone for 3s")
+                lockedHuman = null
+                unlockTimerTask = null
+                stopFollowHuman()
+                onNoHumanFound?.invoke()
+            }
+        }
+        unlockTimer.schedule(unlockTimerTask, 3000L)
+    }
     fun startFollowHuman(human: Human) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
         if (!switchMode(RobotMode.FOLLOW_HUMAN)) return
@@ -118,6 +152,9 @@ class RobotManager(
 
     fun stopFollowHuman() {
         if (currentMode.get() != RobotMode.FOLLOW_HUMAN) return
+        lockedHuman = null
+        unlockTimerTask?.cancel()
+        unlockTimerTask = null
         followHuman?.stop()
         followHuman = null
         setMode(RobotMode.IDLE)

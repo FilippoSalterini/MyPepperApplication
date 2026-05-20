@@ -14,7 +14,7 @@ import com.example.mypepperapplication.vision.BoundingBox
 // ================================================================
 // Main Activity
 // ================================================================
-/**
+/*
  * Entry point Android.
  * Responsabilità (e SOLO queste):
  *   1. Lifecycle Android + QiSDK
@@ -84,7 +84,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         ui.onStopTracking = { robotManager.stopVisualServoing() }
 
         // [5] Snapshot: nessun callback annidato in Activity.
-        //     Tutta la logica camera+detection è dentro RobotManager.processSnapshot().
         ui.onSnapshot = {
             robotManager.processSnapshot(
                 onBitmap    = { bitmap -> ui { ui.showBitmap(bitmap) } },
