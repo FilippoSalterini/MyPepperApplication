@@ -90,53 +90,83 @@ class RobotManager(
 
     fun startFollowHumanAutoDetect(onNoHumanFound: (() -> Unit)? = null) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
+
         ctx.humanAwareness.async().humansAround.andThenConsume { humans ->
+
             if (humans.isNullOrEmpty()) {
                 Log.w(TAG, "No humans detected")
-                if (lockedHuman != null) {
+                if (currentMode.get() == RobotMode.FOLLOW_HUMAN) {
                     scheduleUnlock(onNoHumanFound)
                 } else {
+                    lockedHuman = null
                     onNoHumanFound?.invoke()
                 }
                 return@andThenConsume
             }
-            // C'è almeno un umano — cancella eventuale unlock pendente
+
             unlockTimerTask?.cancel()
             unlockTimerTask = null
 
-            // Se abbiamo già un target e stiamo seguendo → ignora, non fare nulla
             if (lockedHuman != null && currentMode.get() == RobotMode.FOLLOW_HUMAN) {
-                Log.d(TAG, "Already following locked human — skipping")
+                val stillPresent = humans.any { it === lockedHuman || isSameHuman(it, lockedHuman!!, ctx) }
+                if (stillPresent) {
+                    Log.d(TAG, "Locked human still present — continuing")
+                } else {
+                    Log.d(TAG, "Locked human not in list — scheduling unlock")
+                    scheduleUnlock(onNoHumanFound)
+                }
                 return@andThenConsume
             }
 
-            // Prima detection (o dopo unlock): scegli il più vicino e bloccalo
-            Log.i(TAG, "Detected ${humans.size} human(s) — following nearest")
-            val nearest = humans.first() // TODO: ordinare per distanza se hai robotFrame
+            val nearest = findNearestHuman(humans, ctx)
+            if (nearest == null) { onNoHumanFound?.invoke(); return@andThenConsume }
+
+            Log.i(TAG, "Detected ${humans.size} human(s) — locking nearest")
             lockedHuman = nearest
             startFollowHuman(nearest)
         }
     }
 
+    private fun findNearestHuman(humans: List<Human>, ctx: QiContext): Human? {
+        if (humans.isEmpty()) return null
+        if (humans.size == 1) return humans.first()
+
+        return try {
+            val rFrame = ctx.actuation.robotFrame()
+            humans.minByOrNull { human ->
+                try {
+                    val t = human.headFrame
+                        .computeTransform(rFrame).transform.translation
+                    Math.sqrt(t.x * t.x + t.y * t.y)
+                } catch (_: Exception) {
+                    Double.MAX_VALUE  // se non riesce a computare, metti in fondo
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "findNearestHuman fallback: ${e.message}")
+            humans.first()
+        }
+    }
+
     private fun scheduleUnlock(onNoHumanFound: (() -> Unit)?) {
         if (unlockTimerTask != null) return
-        Log.d(TAG, "Human lost — scheduling unlock in 3s")
+
+        // Durante HOLDING Pepper sta ruotando — serve più tolleranza
+        val delayMs = if (currentMode.get() == RobotMode.FOLLOW_HUMAN) 5000L else 3000L
+
+        Log.d(TAG, "Human lost — scheduling unlock in ${delayMs}ms")
         unlockTimerTask = object : java.util.TimerTask() {
             override fun run() {
-                if (currentMode.get() == RobotMode.FOLLOW_HUMAN && followHuman != null) {
-                    Log.d(TAG, "FollowHuman still active — extending lock")
-                    unlockTimerTask = null
-                    return
-                }
-                Log.i(TAG, "Unlock: human gone for 3s")
-                lockedHuman = null
                 unlockTimerTask = null
+                Log.i(TAG, "Unlock: locked human gone — stopping follow")
+                lockedHuman = null
                 stopFollowHuman()
                 onNoHumanFound?.invoke()
             }
         }
-        unlockTimer.schedule(unlockTimerTask, 3000L)
+        unlockTimer.schedule(unlockTimerTask, delayMs)
     }
+
     fun startFollowHuman(human: Human) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
         if (!switchMode(RobotMode.FOLLOW_HUMAN)) return
@@ -222,5 +252,17 @@ class RobotManager(
         currentMode.set(mode)
         listener?.onModeChanged(mode)
         Log.i(TAG, "Mode → $mode")
+    }
+
+    //piccolo check da mettere poi nel lock per verificare che sia stesso umano entro un range
+    private fun isSameHuman(candidate: Human, reference: Human, ctx: QiContext): Boolean {
+        return try {
+            val rFrame = ctx.actuation.robotFrame()
+            val t1 = candidate.headFrame.computeTransform(rFrame).transform.translation
+            val t2 = reference.headFrame.computeTransform(rFrame).transform.translation
+            val dx = t1.x - t2.x
+            val dy = t1.y - t2.y
+            Math.sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm
+        } catch (e: Exception) { false }
     }
 }
