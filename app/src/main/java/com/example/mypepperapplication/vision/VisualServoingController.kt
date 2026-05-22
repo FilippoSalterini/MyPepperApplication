@@ -32,6 +32,9 @@ class VisualServoingController(
         fun onObjectReached(label: String, box: BoundingBox)
         fun onObjectLost(labels: List<String>)
     }
+    /*
+    LISTA DI PARAMETRI DA CALIBRARE
+     */
     var listener: VisualServoingListener? = null
 
     var kpRotation:         Float = 1.0f

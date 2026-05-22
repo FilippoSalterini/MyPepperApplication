@@ -17,18 +17,16 @@ import com.example.mypepperapplication.vision.BoundingBox
 Gestisce tutta la logica UI: spinner, pulsanti, overlay, toast, status bar.
  */
 private const val TAG = "UiController"
-
-
- // Gestisce tutta la logica UI: spinner, pulsanti, overlay, toast, status bar.
-
 class UiController(
     private val binding: ActivityMainBinding,
     private val context: Context
 ) {
     //TODO : vedi oggetti da cercare e logica di default
 
-    /* Se in futuro cercare più oggetti contemporaneamente dalla UI basta aggiungere
-     una selezione multi-choice allo Spinner e passare la lista direttamente a startVisualServoing(labels) */
+    /*
+    Se in futuro dovessi cercare più oggetti contemporaneamente dalla UI basta aggiungere
+     una selezione multi-choice allo Spinner e passare la lista direttamente a startVisualServoing(labels)
+     */
     private val searchableLabels = listOf(
         "laptop", "bottle", "cup", "chair",
         "person", "backpack", "book", "cell phone"

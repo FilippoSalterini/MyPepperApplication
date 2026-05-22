@@ -5,33 +5,38 @@ import android.graphics.RectF
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CancellationException
+import kotlin.coroutines.resume
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
 // ===========================================================================
 // OBJECT DETECTION CONTROLLER
 // ===========================================================================
 
-/* Serve per inviare frame JPEG al server YOLOv8n su pc e decodifica le bounding box
+/*
+Serve per inviare frame JPEG al server YOLOv8n su pc e decodifica le bounding box
 normalizzate [0,1]
 */
 
-/* TODO Ogni chiamata a detect() crea un nuovo CoroutineScope non gestito.
-Considera di usare uno scope di livello
-classe con Job() per poter cancellare tutte le richieste in volo.
-jpegQuality = 70 è un buon compromesso. Se la rete è lenta puoi abbassarlo a 50.
-*/
 private const val TAG = "ObjectDetection"
-/**
- * Bounding box normalizzata [0,1] + metadati del rilevamento.
- */
+
+// Data class immutabile per i risultati
 data class BoundingBox(
     val label: String,
     val score: Float,
@@ -40,74 +45,115 @@ data class BoundingBox(
     val cy: Float = rect.centerY(),
     val source: String = "unknown"
 )
+
 class ObjectDetectionController {
+
+    private val detectionRunning = AtomicBoolean(false)
+    private val classJob = SupervisorJob()
+
+    // Lo scope ora fa da supervisore globale per i job lanciati
+    private val scope = CoroutineScope(classJob + Dispatchers.Main)
+
     fun interface DetectionCallback {
         fun onDetections(boxes: List<BoundingBox>, imageWidth: Int, imageHeight: Int)
     }
-    //URL da modificare con IP corretta
+
+    /**
+     * URL del server YOLOv8.
+     * NOTA: Se modificato durante una richiesta in volo, il cambio sarà effettivo
+     * solo a partire dal frame successivo. La richiesta corrente userà il vecchio URL.
+     */
+    @Volatile
     var serverUrl: String = "http://10.186.13.27:8000"
-
-    //Qualità JPEG per trasferimento
     var jpegQuality: Int = 70
-    // qui ho impostato una mock detection(true) che restituisce una lista vuota
-    // ma non mi interssa veramente che ritorni qualcosa di fake
-    var useMockFallback: Boolean = true
 
+    // Ottimizzato: OkHttpClient configurato localmente, ma idealmente
+    // dovrebbe essere un singleton applicativo.
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .callTimeout(3, TimeUnit.SECONDS)
             .build()
     }
 
-    //API pubblica
-    // Invia [bitmap] al server YOLOv8 sul PC e consegna i risultati a [callback]
     fun detect(bitmap: Bitmap, callback: DetectionCallback) {
-        CoroutineScope(Dispatchers.IO).launch {
-            val boxes = runRemoteYolo(bitmap)
-            withContext(Dispatchers.Main) {
+        if (!detectionRunning.compareAndSet(false, true)) {
+            Log.v(TAG, "Detection skipped: previous request still running")
+            return
+        }
+
+        // Lanciamo sul Main thread così l'interfaccia/callback è safe,
+        // lo smistamento sui thread di I/O avverrà dentro la suspend function.
+        scope.launch {
+            try {
+                val boxes = runRemoteYolo(bitmap)
                 callback.onDetections(boxes, bitmap.width, bitmap.height)
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Detection coroutine cancelled explicitly. Frame dropped.")
+                throw e
+            } finally {
+                detectionRunning.set(false)
             }
         }
     }
 
-    // Remote yolo - server pc
+    /**
+     * Esegue la richiesta HTTP in modo asincrono e nativamente cancellabile.
+     * Grazie a [suspendCancellableCoroutine], se il job viene cancellato dall'esterno,
+     * la chiamata in volo di OkHttp viene interrotta IMMEDIATAMENTE via socket.
+     */
+    private suspend fun runRemoteYolo(bitmap: Bitmap): List<BoundingBox> = withContext(Dispatchers.IO) {
+        val jpegBytes = bitmapToJpeg(bitmap, jpegQuality)
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                name     = "file",
+                filename = "frame.jpg",
+                body     = jpegBytes.toRequestBody("image/jpeg".toMediaType())
+            )
+            .build()
 
-    private fun runRemoteYolo(bitmap: Bitmap): List<BoundingBox> {
-        return try {
-            // compresso in jpeg
-            val jpegBytes = bitmapToJpeg(bitmap, jpegQuality)
+        val request = Request.Builder()
+            .url("$serverUrl/detect")
+            .post(requestBody)
+            .build()
 
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    name     = "file",
-                    filename = "frame.jpg",
-                    body     = jpegBytes.toRequestBody("image/jpeg".toMediaType())
-                )
-                .build()
+        // Sfruttiamo l'API asincrona di OkHttp incapsulata nelle coroutine
+        suspendCancellableCoroutine { continuation ->
+            val call = httpClient.newCall(request)
 
-            val request = Request.Builder()
-                .url("$serverUrl/detect")
-                .post(requestBody)
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                Log.e(TAG, "Server error: ${response.code} ${response.message}")
-                return fallback()
+            // Se la coroutine viene cancellata (es. via cancelChildren), cancella subito la chiamata HTTP
+            continuation.invokeOnCancellation {
+                Log.d(TAG, "Coroutine cancelled. Aborting HTTP call immediately.")
+                call.cancel()
             }
 
-            val body = response.body?.string() ?: return fallback()
-            val parsed = parseServerResponse(body)
+            // Usiamo enqueue() invece di execute() per non bloccare il thread di I/O delle coroutine
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isCancelled) return // Ignora se siamo stati cancellati intenzionalmente
+                    Log.e(TAG, "Remote YOLO request failed: ${e.message}")
+                    continuation.resume(fallback())
+                }
 
-            Log.d(TAG, "Remote YOLO: ${parsed.size} objects detected")
-            parsed
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Remote YOLO request failed: ${e.message}")
-            fallback()
+                override fun onResponse(call: Call, response: Response) {
+                    response.use { res ->
+                        if (!res.isSuccessful) {
+                            Log.e(TAG, "Server error: ${res.code} ${res.message}")
+                            continuation.resume(fallback())
+                            return
+                        }
+                        val body = res.body?.string()
+                        if (body == null) {
+                            continuation.resume(fallback())
+                            return
+                        }
+                        val parsed = parseServerResponse(body)
+                        continuation.resume(parsed)
+                    }
+                }
+            })
         }
     }
 
@@ -116,10 +162,6 @@ class ObjectDetectionController {
         try {
             val root    = JSONObject(json)
             val objects = root.getJSONArray("objects")
-            val inferMs = root.optInt("inference_ms", -1)
-
-            if (inferMs > 0) Log.d(TAG, "Server inference time: ${inferMs}ms")
-
             for (i in 0 until objects.length()) {
                 val obj   = objects.getJSONObject(i)
                 val label = obj.getString("label")
@@ -134,26 +176,16 @@ class ObjectDetectionController {
                 val right  = (cx + w / 2f).coerceIn(0f, 1f)
                 val bottom = (cy + h / 2f).coerceIn(0f, 1f)
 
-                boxes.add(
-                    BoundingBox(
-                        label  = label,
-                        score  = score,
-                        rect   = RectF(left, top, right, bottom),
-                        cx     = cx,
-                        cy     = cy,
-                        source = "remote_yolo"
-                    )
-                )
+                boxes.add(BoundingBox(label, score, RectF(left, top, right, bottom), cx, cy, "remote_yolo"))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Parse error: ${e.message}\nRaw: $json")
+            Log.e(TAG, "Parse error: ${e.message}")
         }
         return boxes
     }
-    private fun fallback(): List<BoundingBox> {
-        Log.w(TAG, "Server unreachable, returning empty list")
-        return emptyList()
-    }
+
+    private fun fallback(): List<BoundingBox> = emptyList()
+
     private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
