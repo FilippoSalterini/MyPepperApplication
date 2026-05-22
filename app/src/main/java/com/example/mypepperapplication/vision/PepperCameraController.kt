@@ -83,29 +83,12 @@ class PepperCameraController {
             }
         }
     }
-    // ── Conversione immagine ──────────────────────────────────────────────────
-    private var formatDiagnosticDone = false
     private fun TimestampedImageHandle.toBitmap(): Bitmap? {
         return try {
             val image = this.image.value
             val buffer = image.data
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
-            // Log diagnostico
-            if (!formatDiagnosticDone) {
-                formatDiagnosticDone = true
-                val expectedRgb888 = 640 * 480 * 3   // 921.600
-                val expectedRgb888_320 = 320 * 240 * 3 // 230.400
-                Log.i(TAG, "=== DIAGNOSTIC CAMERA FORMAT ===")
-                Log.i(TAG, "Buffer size: ${bytes.size} byte")
-                Log.i(TAG, "Waited RGB888 640x480: $expectedRgb888 | 320x240: $expectedRgb888_320")
-                Log.i(TAG, "First 4 bytes (JPEG starts with FF D8 FF): ${bytes.take(4).map { "%02X".format(it) }}")
-                if (bytes.size == expectedRgb888 || bytes.size == expectedRgb888_320) {
-                    Log.w(TAG, "WARNING: This looks like raw RGB888 — decodeByteArray may return null!")
-                } else {
-                    Log.i(TAG, "Probably compressed JPEG — decodeByteArray should work.")
-                }
-            }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (e: Exception) {
             Log.e(TAG, "toBitmap error: ${e.message}", e)

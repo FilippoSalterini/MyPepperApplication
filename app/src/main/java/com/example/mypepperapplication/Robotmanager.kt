@@ -11,6 +11,7 @@ import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.sqrt
 
 // =============================================================================
 // RobotManager
@@ -137,7 +138,7 @@ class RobotManager(
                 try {
                     val t = human.headFrame
                         .computeTransform(rFrame).transform.translation
-                    Math.sqrt(t.x * t.x + t.y * t.y)
+                    sqrt(t.x * t.x + t.y * t.y)
                 } catch (_: Exception) {
                     Double.MAX_VALUE  // se non riesce a computare, metti in fondo
                 }
@@ -179,7 +180,7 @@ class RobotManager(
                 override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
                 override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
                 override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen() }
-                override fun onDistanceToHumanChanged(d: Double) { listener?.onDistanceChanged(d) }
+                override fun onDistanceToHumanChanged(distance: Double) { listener?.onDistanceChanged(distance) }
             }
         ).also { it.start() }
         Log.i(TAG, "FollowHuman started")
@@ -216,7 +217,7 @@ class RobotManager(
     }
     fun processSnapshot(
         onBitmap: (Bitmap) -> Unit,
-        onDetection: (boxes: List<com.example.mypepperapplication.vision.BoundingBox>, w: Int, h: Int) -> Unit
+        onDetection: (boxes: List<BoundingBox>, w: Int, h: Int) -> Unit
     ) {
         cameraController.takeSinglePicture { bitmap, _ ->
             onBitmap(bitmap)
@@ -262,7 +263,7 @@ class RobotManager(
             val t2 = reference.headFrame.computeTransform(rFrame).transform.translation
             val dx = t1.x - t2.x
             val dy = t1.y - t2.y
-            Math.sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm
-        } catch (e: Exception) { false }
+            sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm
+        } catch (_: Exception) { false }
     }
 }

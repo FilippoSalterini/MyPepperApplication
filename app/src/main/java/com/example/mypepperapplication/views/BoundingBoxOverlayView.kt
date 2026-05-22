@@ -9,6 +9,9 @@ import android.util.AttributeSet
 import android.util.Log
 import android.view.View
 import com.example.mypepperapplication.vision.BoundingBox
+import androidx.core.graphics.toColorInt
+import kotlin.math.abs
+
 // ===========================================================================
 // BOUNDING BOX OVERLAY VIEW
 // ===========================================================================
@@ -49,9 +52,9 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     }
 
     private val colorBySource = mapOf(
-        "remote_yolo" to Color.parseColor("#00E676"),
-        "mock"        to Color.parseColor("#FF9100"),
-        "unknown"     to Color.parseColor("#40C4FF")
+        "remote_yolo" to "#00E676".toColorInt(),
+        "mock"        to "#FF9100".toColorInt(),
+        "unknown"     to "#40C4FF".toColorInt()
     )
 
     // ── API pubblica ──────────────────────────────────────────────────────────
@@ -59,15 +62,10 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     fun update(boxes: List<BoundingBox>, imgW: Int = 0, imgH: Int = 0) {
         if (imgW > 0 && imgH > 0) {
             val incomingRatio = imgW.toFloat() / imgH
-            if(Math.abs(incomingRatio - imageRatio) > 0.01f)
+            if(abs(incomingRatio - imageRatio) > 0.01f)
                 Log.w("BoundingBoxOverlayView", "Ratio Mismatch: waited $imageRatio, received $incomingRatio")
         }
         this.boxes = boxes
-        invalidate()
-    }
-
-    fun clear() {
-        boxes = emptyList()
         invalidate()
     }
 
@@ -76,41 +74,27 @@ class BoundingBoxOverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (boxes.isEmpty()) return
-
         val vw = width.toFloat()
         val vh = height.toFloat()
         if (vw == 0f || vh == 0f) return
         val viewRatio = vw / vh
-        val imgLeft: Float
-        val imgTop: Float
-        val imgWidth: Float
-        val imgHeight: Float
-
-        if (viewRatio < imageRatio) {
-            // Bande nere laterali — l'immagine occupa tutta l'altezza
-            imgWidth  = vw
-            imgHeight = vw / imageRatio
-            imgLeft   = 0f
-            imgTop    = (vh - imgHeight) / 2f
+        val (imgWidth, imgHeight) = if (viewRatio > imageRatio) {
+            vw to (vw / imageRatio)
         } else {
-            // Bande nere sopra/sotto — l'immagine occupa tutta la larghezza
-            imgHeight = vh
-            imgWidth  = vh * imageRatio
-            imgLeft   = (vw - imgWidth) / 2f
-            imgTop    = 0f
+            (vh * imageRatio) to vh
         }
+        val dx = (vw - imgWidth) / 2f
+        val dy = (vh - imgHeight) / 2f
 
-        // ── Disegna ogni box ──────────────────────────────────────────────────
-
+        // 3. Disegna
         for (box in boxes) {
-            // Scala coordinate normalizzate → pixel nell'area effettiva immagine
-            val left   = imgLeft + box.rect.left   * imgWidth
-            val top    = imgTop  + box.rect.top    * imgHeight
-            val right  = imgLeft + box.rect.right  * imgWidth
-            val bottom = imgTop  + box.rect.bottom * imgHeight
-            val rect   = RectF(left, top, right, bottom)
+            val left   = dx + box.rect.left * imgWidth
+            val top    = dy + box.rect.top * imgHeight
+            val right  = dx + box.rect.right * imgWidth
+            val bottom = dy + box.rect.bottom * imgHeight
 
-            val color = colorBySource[box.source] ?: Color.parseColor("#40C4FF")
+            val rect = RectF(left, top, right, bottom)
+            val color = colorBySource[box.source] ?: "#40C4FF".toColorInt()
             boxPaint.color = color
 
             canvas.drawRoundRect(rect, 8f, 8f, boxPaint)

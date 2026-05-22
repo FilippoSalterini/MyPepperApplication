@@ -58,17 +58,16 @@ class ObjectDetectionController {
         fun onDetections(boxes: List<BoundingBox>, imageWidth: Int, imageHeight: Int)
     }
 
-    /**
-     * URL del server YOLOv8.
-     * NOTA: Se modificato durante una richiesta in volo, il cambio sarà effettivo
-     * solo a partire dal frame successivo. La richiesta corrente userà il vecchio URL.
+    /*
+     * URL del server YOLOv8n
      */
     @Volatile
     var serverUrl: String = "http://10.186.13.27:8000"
     var jpegQuality: Int = 70
 
-    // Ottimizzato: OkHttpClient configurato localmente, ma idealmente
-    // dovrebbe essere un singleton applicativo.
+    // OkHttpClient configurato localmente, ma idealmente (appunto in questo
+    // progetto non risulta essere limitante siccome obj det controller
+    // viene creato una sola volta) dovrebbe essere un singleton applicativo.
     private val httpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(2, TimeUnit.SECONDS)
@@ -83,8 +82,6 @@ class ObjectDetectionController {
             return
         }
 
-        // Lanciamo sul Main thread così l'interfaccia/callback è safe,
-        // lo smistamento sui thread di I/O avverrà dentro la suspend function.
         scope.launch {
             try {
                 val boxes = runRemoteYolo(bitmap)
@@ -98,7 +95,7 @@ class ObjectDetectionController {
         }
     }
 
-    /**
+    /*
      * Esegue la richiesta HTTP in modo asincrono e nativamente cancellabile.
      * Grazie a [suspendCancellableCoroutine], se il job viene cancellato dall'esterno,
      * la chiamata in volo di OkHttp viene interrotta IMMEDIATAMENTE via socket.
@@ -132,7 +129,7 @@ class ObjectDetectionController {
             // Usiamo enqueue() invece di execute() per non bloccare il thread di I/O delle coroutine
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isCancelled) return // Ignora se siamo stati cancellati intenzionalmente
+                    if (continuation.isCancelled) return
                     Log.e(TAG, "Remote YOLO request failed: ${e.message}")
                     continuation.resume(fallback())
                 }
