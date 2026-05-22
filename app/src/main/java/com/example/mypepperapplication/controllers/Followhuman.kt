@@ -41,7 +41,7 @@ class FollowHuman(
     companion object {
         private const val TAG                  = "FollowHuman"
         private const val CLOSE_ENOUGH_DISTANCE = 1.0
-        private const val TOO_FAR_DISTANCE      = 1.6
+        private const val TOO_FAR_DISTANCE      = 1.7
         private const val DISTANCE_INTERVAL_MS  = 500L
         private const val STUCK_AFTER_ERRORS    = 4
         private const val CANT_REACH_AFTER      = 10
@@ -125,8 +125,6 @@ class FollowHuman(
                                 Log.w(TAG, "Timer cancelled during HOLDING exit — skip")
                             }
                         }
-
-                        // Watchdog di Sicurezza: Se siamo in holding ma il LookAt nativo è morto, lo resuscitiamo
                         isHolding.get() && !isBodyLookAtActive.get() -> {
                             Log.d(TAG, "HOLDING Watchdog: LookAt HEAD_AND_BASE was idle, restarting")
                             enterHolding()
