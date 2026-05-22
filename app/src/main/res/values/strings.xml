@@ -7,4 +7,10 @@
     <string name="stop">STOP</string>
     <string name="rotate_right">ROTATE RIGHT</string>
     <string name="backward">BACKWARD</string>
+    <string name="camerapreview">CameraPreview</string>
+    <string name="idle">Idle</string>
+    <string name="object">Object:</string>
+    <string name="snapshot">Snapshot</string>
+    <string name="follow_human">Follow Human</string>
+    <string name="track_object">Track Object</string>
 </resources>

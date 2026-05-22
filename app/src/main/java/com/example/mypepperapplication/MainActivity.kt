@@ -55,7 +55,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         robotManager = RobotManager(listener = buildRobotListener()).apply {
             onRobotReady(ctx)
             detectionController.serverUrl       = AppConfig.DETECTION_SERVER_URL
-            detectionController.useMockFallback = AppConfig.USE_MOCK_FALLBACK
         }
 
         bindUiToRobot()

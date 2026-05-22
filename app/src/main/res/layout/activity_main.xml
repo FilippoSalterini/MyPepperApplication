@@ -11,16 +11,19 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="#111111"
+        android:contentDescription="@string/camerapreview"
         android:scaleType="centerCrop" />
 
     <!-- Bounding box overlay -->
+
+    <!-- Top status bar -->
+
     <com.example.mypepperapplication.views.BoundingBoxOverlayView
         android:id="@+id/overlayView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/transparent" />
 
-    <!-- Top status bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -36,7 +39,7 @@
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Idle"
+            android:text="@string/idle"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -84,7 +87,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Object:"
+                android:text="@string/object"
                 android:textColor="#CCCCCC"
                 android:textSize="13sp"
                 android:layout_marginEnd="10dp" />
@@ -113,7 +116,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp"
-                android:text="Snapshot"
+                android:text="@string/snapshot"
                 android:textColor="#FFFFFF" />
 
             <Button
@@ -122,14 +125,14 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp"
-                android:text="Follow Human" />
+                android:text="@string/follow_human" />
 
             <Button
                 android:id="@+id/btnTrack"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Track Object" />
+                android:text="@string/track_object" />
 
         </LinearLayout>
 
