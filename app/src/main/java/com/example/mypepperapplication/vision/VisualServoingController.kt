@@ -3,6 +3,7 @@ package com.example.mypepperapplication.vision
 import android.graphics.Bitmap
 import android.util.Log
 import com.example.mypepperapplication.controllers.PepperMovementController
+import com.example.mypepperapplication.controllers.HeadMovementController
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
 import kotlin.math.abs
@@ -34,7 +35,8 @@ import kotlin.math.abs
 private const val TAG = "VisualServoing"
 
 class VisualServoingController(
-    private val movementController: PepperMovementController
+    private val movementController: PepperMovementController,
+    private val headController:     HeadMovementController
 ) {
 
     interface VisualServoingListener {
@@ -42,12 +44,14 @@ class VisualServoingController(
         fun onObjectLost(labels: List<String>)
     }
 
-    // ── Parametri calibrabili ─────────────────────────────────────────────
+    // Parametri da calibrare
 
     // Servoing
-    var kpRotation:         Float = 1.0f
-    var maxRotationStep:    Float = 0.25f
-    var horizontalDeadzone: Float = 0.07f
+    var kpRotation:         Float = 0.8f
+    var maxRotationStep:    Float = 0.20f
+    var bodyRotationZone:   Float = 0.18f
+    var headOnlyZone:       Float = 0.07f
+    var horizontalDeadzone: Float = 0.05f
 
     var kpForward:          Float = 0.6f
     var maxAdvanceStep:     Float = 0.20f
@@ -58,6 +62,8 @@ class VisualServoingController(
     var maxMissedFrames:    Int   = 10
     var cycleDelayMs:       Long  = 200L    // frequenza loop servoing
 
+    var lpfAlpha:           Float  = 0.35f
+
     // Scan
     var scanStepRad:        Double = 0.3    // circa 17grad per ogni step
     var scanSteps:          Int    = 12
@@ -65,6 +71,8 @@ class VisualServoingController(
 
     var listener: VisualServoingListener? = null
 
+    private var smoothErrX = 0f
+    private var smoothErrY = 0f
     private val scope       = CoroutineScope(Dispatchers.IO + Job())
     private var trackingJob: Job? = null
 
@@ -82,85 +90,62 @@ class VisualServoingController(
     ) {
         require(labels.isNotEmpty()) { "labels cannot be empty" }
         stopTracking()
+        smoothErrX = 0f
+        smoothErrY = 0f
         Log.i(TAG, "Visual servoing started. Targets=$labels")
 
         trackingJob = scope.launch {
 
-            // ── FASE 0: SCAN ──────────────────────────────────────────────
+            // FASE 0 - SCAN
             Log.i(TAG, "PHASE 0 SCAN — looking for $labels over $scanSteps steps")
             var found = false
 
             repeat(scanSteps) { step ->
                 if (!isActive || found) return@repeat
+                val jitter = (Math.random() * 0.05 - 0.025)
+                movementController.rotateAwait(theta = scanStepRad + jitter)
 
-                // Ruota di uno step
-                movementController.rotateAwait(theta = scanStepRad)
+                headController.resetHead()
                 delay(scanDelayMs)
 
-                // Scatta
-                val bmp: Bitmap = suspendCancellableCoroutine { cont ->
-                    cameraController.takeSinglePicture { b, _ ->
-                        if (cont.isActive) cont.resume(b)
-                    }
-                }
-
-                // Detecta
-                val boxes: List<BoundingBox> = suspendCancellableCoroutine { cont ->
-                    detectionController.detect(bmp) { b, _, _ ->
-                        if (cont.isActive) cont.resume(b)
-                    }
-                }
-
-                val hit = boxes
-                    .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
-                    .maxByOrNull { it.score }
+                val bmp   = captureFrame(cameraController)
+                val boxes = runDetection(detectionController, bmp)
+                val hit   = boxes.bestMatch(labels)
 
                 if (hit != null) {
-                    Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} at step=$step — entering servoing")
+                    Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} step=$step")
+                    // ★ FIX COMPATIBILITÀ: Rimosso speed e normErrY opzionale (usa di default 0f)
+                    headController.setGaze(normErrX = hit.cx - 0.5f)
                     found = true
                 } else {
-                    Log.d(TAG, "SCAN step=$step — nothing found")
+                    Log.d(TAG, "SCAN step=$step — nothing")
                 }
             }
 
             if (!found) {
-                Log.w(TAG, "SCAN complete — target not found after $scanSteps steps")
+                Log.w(TAG, "SCAN complete — target not found")
                 movementController.stopMovement()
+                headController.resetHead()
                 listener?.onObjectLost(labels)
                 return@launch
             }
 
-            // ── FASE 1 - 2: SERVOING ────────────────────────────────────────
             Log.i(TAG, "Entering servoing loop")
             var missedFrames = 0
 
             while (isActive) {
 
-                // Scatta
-                val bitmap: Bitmap = suspendCancellableCoroutine { cont ->
-                    cameraController.takeSinglePicture { bmp, _ ->
-                        if (cont.isActive) cont.resume(bmp)
-                    }
-                }
-
-                // Detecta
-                val boxes: List<BoundingBox> = suspendCancellableCoroutine { cont ->
-                    detectionController.detect(bitmap) { b, _, _ ->
-                        if (cont.isActive) cont.resume(b)
-                    }
-                }
-
-                // Miglior candidato
-                val target = boxes
-                    .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
-                    .maxByOrNull { it.score }
+                val bitmap = captureFrame(cameraController)
+                val boxes  = runDetection(detectionController, bitmap)
+                val target = boxes.bestMatch(labels)
 
                 if (target == null) {
                     missedFrames++
-                    Log.d(TAG, "No target detected ($missedFrames/$maxMissedFrames) labels=$labels")
+                    Log.d(TAG, "No target ($missedFrames/$maxMissedFrames)")
                     if (missedFrames >= maxMissedFrames) {
-                        Log.w(TAG, "Target lost — stop")
+                        Log.w(TAG, "Target lost")
                         movementController.stopMovement()
+                        headController.resetHead()
                         listener?.onObjectLost(labels)
                         break
                     }
@@ -169,46 +154,65 @@ class VisualServoingController(
                 }
 
                 missedFrames = 0
-                val errX    = target.cx - 0.5f
-                val rawArea = target.rect.width() * target.rect.height()
-                val errArea = targetArea - rawArea
 
-                Log.d(TAG, "[${target.label}] cx=%.2f area=%.4f errX=%.3f errArea=%.3f"
-                    .format(target.cx, rawArea, errX, errArea))
+                // LOW-PASS FILTER
+                val rawErrX  = target.cx - 0.5f
+                val rawErrY  = target.cy - 0.5f
+                smoothErrX   = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
+                smoothErrY   = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
 
-                // FASE 1 — Centra
-                if (abs(errX) > horizontalDeadzone) {
-                    val theta = (-kpRotation * errX)
-                        .coerceIn(-maxRotationStep, maxRotationStep)
-                        .toDouble()
-                    Log.i(TAG, "PHASE 1 ROTATE theta=%.3f (errX=%.3f)".format(theta, errX))
-                    movementController.rotateAwait(theta = theta, maxSpeed = 0.5f)
+                val rawArea  = target.rect.width() * target.rect.height()
+                val errArea  = targetArea - rawArea
 
-                    delay(cycleDelayMs)
-                    continue
-                }
+                Log.d(TAG, "[${target.label}] cx=%.2f errX=%.3f(s=%.3f) area=%.4f"
+                    .format(target.cx, rawErrX, smoothErrX, rawArea))
 
-                // FASE 2 — Avanza
-                if (errArea > areaDeadzone) {
-                    val rawStep = kpForward * errArea
-                    if (rawStep < minAdvanceStep) {
-                        Log.i(TAG, "Step too small — TARGET REACHED [${target.label}]")
+                headController.setGaze(
+                    normErrX = smoothErrX,
+                    normErrY = smoothErrY
+                )
+
+                // FASE 1a — Errore piccolo: solo testa
+                if (abs(smoothErrX) < headOnlyZone) {
+                    Log.v(TAG, "HEAD ONLY zone — no body rotation")
+                    if (errArea > areaDeadzone) {
+                        val rawStep = kpForward * errArea
+                        if (rawStep >= minAdvanceStep) {
+                            val dist = rawStep.coerceAtMost(maxAdvanceStep).toDouble()
+                            Log.i(TAG, "PHASE 2 ADVANCE dist=%.3f".format(dist))
+                            movementController.cancelAndMoveAwait(x = dist)
+                        }
+                    } else if (abs(smoothErrX) <= horizontalDeadzone) {
+                        Log.i(TAG, "TARGET REACHED [${target.label}]")
                         movementController.stopMovement()
                         listener?.onObjectReached(target.label, target)
                         break
                     }
-                    val dist = rawStep.coerceAtMost(maxAdvanceStep).toDouble()
-                    Log.i(TAG, "PHASE 2 ADVANCE dist=%.3f m (errArea=%.3f)".format(dist, errArea))
-                    movementController.cancelAndMoveAwait(x = dist, theta = 0.0)
+                    delay(cycleDelayMs)
                     continue
                 }
 
-                // TARGET RAGGIUNTO
-                Log.i(TAG, "TARGET REACHED: [${target.label}] cx=%.2f area=%.4f"
-                    .format(target.cx, rawArea))
-                movementController.stopMovement()
-                listener?.onObjectReached(target.label, target)
-                break
+                // FASE 1b — Errore medio/grande: ruota corpo
+                if (abs(smoothErrX) >= bodyRotationZone) {
+                    val theta = (-kpRotation * smoothErrX)
+                        .coerceIn(-maxRotationStep, maxRotationStep)
+                        .toDouble()
+                    Log.i(TAG, "PHASE 1 ROTATE theta=%.3f (smoothErrX=%.3f)".format(theta, smoothErrX))
+                    movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
+                    smoothErrX *= 0.5f
+                    delay(cycleDelayMs)
+                    continue
+                }
+
+                // FASE 1c — Zona intermedia
+                val theta = (-kpRotation * smoothErrX * 0.5f)
+                    .coerceIn(-maxRotationStep * 0.5f, maxRotationStep * 0.5f)
+                    .toDouble()
+                if (abs(theta) > 0.03) {
+                    movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
+                }
+
+                delay(cycleDelayMs)
             }
 
             Log.i(TAG, "Tracking loop finished.")
@@ -219,8 +223,26 @@ class VisualServoingController(
         if (trackingJob?.isActive == true) {
             trackingJob?.cancel()
             movementController.stopMovement()
+            headController.resetHead()
             Log.i(TAG, "Visual servoing stopped.")
         }
         trackingJob = null
     }
+
+    private suspend fun captureFrame(cam: PepperCameraController): Bitmap =
+        suspendCancellableCoroutine { cont ->
+            cam.takeSinglePicture { bmp, _ -> if (cont.isActive) cont.resume(bmp) }
+        }
+
+    private suspend fun runDetection(
+        det: ObjectDetectionController,
+        bmp: Bitmap
+    ): List<BoundingBox> =
+        suspendCancellableCoroutine { cont ->
+            det.detect(bmp) { boxes, _, _ -> if (cont.isActive) cont.resume(boxes) }
+        }
+
+    private fun List<BoundingBox>.bestMatch(labels: List<String>) =
+        filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
+            .maxByOrNull { it.score }
 }

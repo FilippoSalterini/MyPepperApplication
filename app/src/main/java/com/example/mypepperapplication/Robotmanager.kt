@@ -9,6 +9,7 @@ import com.aldebaran.qi.sdk.`object`.holder.Holder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.example.mypepperapplication.controllers.FollowHuman
 import com.example.mypepperapplication.controllers.PepperMovementController
+import com.example.mypepperapplication.controllers.HeadMovementController
 import com.example.mypepperapplication.vision.BoundingBox
 import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
@@ -47,9 +48,10 @@ class RobotManager(
 
     private val movementController  = PepperMovementController()
     private val cameraController    = PepperCameraController()
+    private val headController      = HeadMovementController()
     val detectionController = ObjectDetectionController()
 
-    private val servoingController = VisualServoingController(movementController).also {
+    private val servoingController = VisualServoingController(movementController, headController).also {
         it.listener = object : VisualServoingController.VisualServoingListener {
             override fun onObjectReached(label: String, box: BoundingBox) {
                 Log.i(TAG, "Object reached: $label")
@@ -85,6 +87,7 @@ class RobotManager(
         qiContext = ctx
         movementController.onRobotReady(ctx)
         cameraController.onRobotReady(ctx)
+        headController.onRobotReady(ctx)
         servoingController.onRobotReady()
         Log.i(TAG, "Robot ready")
     }
@@ -93,6 +96,7 @@ class RobotManager(
         stopAll()
         movementController.onRobotLost()
         cameraController.onRobotLost()
+        headController.onRobotLost()
         servoingController.onRobotLost()
         qiContext = null
         Log.i(TAG, "Robot lost")
