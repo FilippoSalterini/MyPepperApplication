@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.`object`.human.Human
+import com.aldebaran.qi.sdk.`object`.holder.AutonomousAbilitiesType
+import com.aldebaran.qi.sdk.`object`.holder.Holder
+import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.example.mypepperapplication.controllers.FollowHuman
 import com.example.mypepperapplication.controllers.PepperMovementController
 import com.example.mypepperapplication.vision.BoundingBox
@@ -25,7 +28,6 @@ import kotlin.math.sqrt
 class RobotManager(
     private val listener: RobotManagerListener? = null
 ) {
-
     interface RobotManagerListener {
         fun onModeChanged(mode: RobotMode)
         fun onFollowingHuman()
@@ -51,11 +53,13 @@ class RobotManager(
         it.listener = object : VisualServoingController.VisualServoingListener {
             override fun onObjectReached(label: String, box: BoundingBox) {
                 Log.i(TAG, "Object reached: $label")
+                releaseForServoing() //QUANDO TROVO OGGETTO ESCO E RITORNO ALLE AUT ABILIT
                 setMode(RobotMode.IDLE)
                 listener?.onObjectReached(label, box)
             }
             override fun onObjectLost(labels: List<String>) {
                 Log.w(TAG, "Object lost: $labels")
+                releaseForServoing() //QUANDO PERDO OGGETTO ESCO E RITORNO ALLE AUT ABILIT
                 setMode(RobotMode.IDLE)
                 listener?.onObjectLost(labels)
                 listener?.onServoingStopped()
@@ -70,6 +74,11 @@ class RobotManager(
     private var followHuman: FollowHuman? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
     private var qiContext: QiContext? = null
+
+    // disabilitare autonomous abilities
+    private var servoingHolder: Holder? = null
+    private var basicAwarenessHolder: Holder? = null
+    private var backgroundMovementHolder: Holder? = null
 
     val mode: RobotMode get() = currentMode.get()
     fun onRobotReady(ctx: QiContext) {
@@ -88,7 +97,36 @@ class RobotManager(
         qiContext = null
         Log.i(TAG, "Robot lost")
     }
+    private fun holdForServoing() {
+        val ctx = qiContext ?: return
+        try {
+            servoingHolder = HolderBuilder.with(ctx)
+                .withAutonomousAbilities(
+                    AutonomousAbilitiesType.BASIC_AWARENESS,
+                    AutonomousAbilitiesType.BACKGROUND_MOVEMENT,
+                    AutonomousAbilitiesType.AUTONOMOUS_BLINKING
+                )
+                .build()
+            servoingHolder?.async()?.hold()
+            Log.i(TAG, "Autonomous abilities held")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not hold abilities: ${e.message}")
+        }
+    }
 
+    private fun releaseForServoing() {
+        try {
+            basicAwarenessHolder?.async()?.release()
+            backgroundMovementHolder?.async()?.release()
+            Log.i(TAG, "Autonomous abilities released")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not release abilities: ${e.message}")
+        } finally {
+            basicAwarenessHolder = null
+            backgroundMovementHolder = null
+        }
+    }
+    
     fun startFollowHumanAutoDetect(onNoHumanFound: (() -> Unit)? = null) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
 
@@ -200,6 +238,7 @@ class RobotManager(
 
     fun startVisualServoing(labels: List<String>) {
         if (!switchMode(RobotMode.VISUAL_SERVOING)) return
+        holdForServoing()
         servoingController.startTracking(
             cameraController    = cameraController,
             detectionController = detectionController,
@@ -212,6 +251,7 @@ class RobotManager(
     fun stopVisualServoing() {
         if (currentMode.get() != RobotMode.VISUAL_SERVOING) return
         servoingController.stopTracking()
+        releaseForServoing()
         setMode(RobotMode.IDLE)
         listener?.onServoingStopped()
     }
@@ -230,7 +270,7 @@ class RobotManager(
     fun stopAll() {
         when (currentMode.get()) {
             RobotMode.FOLLOW_HUMAN    -> { followHuman?.stop(); followHuman = null }
-            RobotMode.VISUAL_SERVOING -> { servoingController.stopTracking(); listener?.onServoingStopped() }
+            RobotMode.VISUAL_SERVOING -> { servoingController.stopTracking();releaseForServoing(); listener?.onServoingStopped() }
             RobotMode.IDLE            -> { }
         }
         setMode(RobotMode.IDLE)
@@ -263,7 +303,7 @@ class RobotManager(
             val t2 = reference.headFrame.computeTransform(rFrame).transform.translation
             val dx = t1.x - t2.x
             val dy = t1.y - t2.y
-            sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm
+            sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm RIVEDI
         } catch (_: Exception) { false }
     }
 }
