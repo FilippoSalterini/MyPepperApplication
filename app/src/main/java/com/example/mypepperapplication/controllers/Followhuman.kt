@@ -37,7 +37,7 @@ class FollowHuman(
         fun onChargingFlapOpen()
         fun onDistanceToHumanChanged(distance: Double)
     }
-
+    // CHECK PARAMETRI
     companion object {
         private const val TAG                  = "FollowHuman"
         private const val CLOSE_ENOUGH_DISTANCE = 1.0
@@ -92,7 +92,6 @@ class FollowHuman(
 
             // Interrogazione asincrona isolata nel tick del timer
             humanToFollow.async().headFrame.andThenConsume { liveFrame ->
-                // FIX CONCORRENZA: Protezione contro i risultati fuori ordine (Stale Data) se l'azione è stata fermata
                 if (!shouldFollowHuman.get()) return@andThenConsume
                 if (liveFrame == null || !::robotFrame.isInitialized) return@andThenConsume
 
@@ -172,8 +171,6 @@ class FollowHuman(
 
         stopLookAt()
         isBodyLookAtActive.set(true)
-
-        // Se il GoTo sta girando, aspettiamo che finisca o venga cancellato
         val currentGoTo = goToFuture
         val baseReleaseFuture = if (currentGoTo != null && !currentGoTo.isDone) {
             currentGoTo.thenCompose { Future.of(null) }
