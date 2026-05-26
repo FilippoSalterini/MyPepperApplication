@@ -94,7 +94,7 @@ class VisualServoingController(
                 if (!isActive || found) return@repeat
 
                 // Ruota di uno step
-                movementController.cancelAndMoveAwait(theta = scanStepRad)
+                movementController.rotateAwait(theta = scanStepRad)
                 delay(scanDelayMs)
 
                 // Scatta
@@ -182,7 +182,8 @@ class VisualServoingController(
                         .coerceIn(-maxRotationStep, maxRotationStep)
                         .toDouble()
                     Log.i(TAG, "PHASE 1 ROTATE theta=%.3f (errX=%.3f)".format(theta, errX))
-                    movementController.moveNonBlocking(theta = theta)
+                    movementController.rotateAwait(theta = theta, maxSpeed = 0.5f)
+
                     delay(cycleDelayMs)
                     continue
                 }

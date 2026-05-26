@@ -22,14 +22,8 @@ class UiController(
     private val context: Context
 ) {
     //TODO : vedi oggetti da cercare e logica di default
-
-    /*
-    Se in futuro dovessi cercare più oggetti contemporaneamente dalla UI basta aggiungere
-     una selezione multi-choice allo Spinner e passare la lista direttamente a startVisualServoing(labels)
-     */
     private val searchableLabels = listOf(
-        "laptop", "bottle", "cup", "chair",
-        "person", "backpack", "book", "cell phone"
+        "bottle"
     )
 
     var onFollowHuman: (() -> Unit)? = null
