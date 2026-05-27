@@ -16,6 +16,9 @@ import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // =============================================================================
 // RobotManager
@@ -45,7 +48,8 @@ class RobotManager(
     companion object {
         private const val TAG = "RobotManager"
     }
-
+    private val managerScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val modeMutex = Mutex()
     private val movementController  = PepperMovementController()
     private val cameraController    = PepperCameraController()
     private val headController      = HeadMovementController()
@@ -55,16 +59,24 @@ class RobotManager(
         it.listener = object : VisualServoingController.VisualServoingListener {
             override fun onObjectReached(label: String, box: BoundingBox) {
                 Log.i(TAG, "Object reached: $label")
-                releaseForServoing() //QUANDO TROVO OGGETTO ESCO E RITORNO ALLE AUT ABILIT
-                setMode(RobotMode.IDLE)
-                listener?.onObjectReached(label, box)
+                managerScope.launch {
+                    modeMutex.withLock {
+                        cleanStopServoing()
+                        withContext(Dispatchers.Main) { listener?.onObjectReached(label, box) }
+                    }
+                }
             }
             override fun onObjectLost(labels: List<String>) {
                 Log.w(TAG, "Object lost: $labels")
-                releaseForServoing() //QUANDO PERDO OGGETTO ESCO E RITORNO ALLE AUT ABILIT
-                setMode(RobotMode.IDLE)
-                listener?.onObjectLost(labels)
-                listener?.onServoingStopped()
+                managerScope.launch {
+                    modeMutex.withLock {
+                        cleanStopServoing()
+                        withContext(Dispatchers.Main) {
+                            listener?.onObjectLost(labels)
+                            listener?.onServoingStopped()
+                        }
+                    }
+                }
             }
         }
     }
@@ -79,9 +91,6 @@ class RobotManager(
 
     // disabilitare autonomous abilities
     private var servoingHolder: Holder? = null
-    private var basicAwarenessHolder: Holder? = null
-    private var backgroundMovementHolder: Holder? = null
-
     val mode: RobotMode get() = currentMode.get()
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
@@ -104,6 +113,7 @@ class RobotManager(
     private fun holdForServoing() {
         val ctx = qiContext ?: return
         try {
+            releaseForServoing()
             servoingHolder = HolderBuilder.with(ctx)
                 .withAutonomousAbilities(
                     AutonomousAbilitiesType.BASIC_AWARENESS,
@@ -120,17 +130,33 @@ class RobotManager(
 
     private fun releaseForServoing() {
         try {
-            basicAwarenessHolder?.async()?.release()
-            backgroundMovementHolder?.async()?.release()
-            Log.i(TAG, "Autonomous abilities released")
+            servoingHolder?.async()?.release()
+            Log.i(TAG, "Autonomous abilities successfully released")
         } catch (e: Exception) {
             Log.w(TAG, "Could not release abilities: ${e.message}")
         } finally {
-            basicAwarenessHolder = null
-            backgroundMovementHolder = null
+            servoingHolder = null
         }
     }
-    
+    // FLUSSO DI CLEANUP ATOMICO CON TIMEOUT
+    /**
+     * Esegue l'arresto sequenziale e sicuro del ciclo di servoing.
+     * Deve essere invocata sempre all'interno del blocco modeMutex.withLock.
+     */
+    private suspend fun cleanStopServoing() {
+        Log.i(TAG, "Executing cleanStopServoing...")
+
+        withTimeoutOrNull(1500L) {
+            servoingController.stopTracking()
+        }
+        // Fix: Fermiamo la base prima di restituire il controllo al sistema nativo
+        movementController.stopMovement()
+        // Finestra di tolleranza per far respirare il middleware di Pepper
+        delay(250L)
+        // Rilascio effettivo delle abilità autonome libere da conflitti
+        releaseForServoing()
+        setMode(RobotMode.IDLE)
+    }
     fun startFollowHumanAutoDetect(onNoHumanFound: (() -> Unit)? = null) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
 
@@ -212,52 +238,70 @@ class RobotManager(
 
     fun startFollowHuman(human: Human) {
         val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
-        if (!switchMode(RobotMode.FOLLOW_HUMAN)) return
 
-        followHuman = FollowHuman(
-            qiContext           = ctx,
-            humanToFollow       = human,
-            followHumanListener = object : FollowHuman.FollowHumanListener {
-                override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
-                override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
-                override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
-                override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen() }
-                override fun onDistanceToHumanChanged(distance: Double) { listener?.onDistanceChanged(distance) }
+        managerScope.launch {
+            modeMutex.withLock {
+                if (!switchModeAsync(RobotMode.FOLLOW_HUMAN)) return@withLock
+
+                followHuman = FollowHuman(
+                    qiContext           = ctx,
+                    humanToFollow       = human,
+                    followHumanListener = object : FollowHuman.FollowHumanListener {
+                        override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
+                        override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
+                        override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
+                        override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen() }
+                        override fun onDistanceToHumanChanged(distance: Double) { listener?.onDistanceChanged(distance) }
+                    }
+                ).also { it.start() }
+
+                Log.i(TAG, "FollowHuman started under Mutex protection")
             }
-        ).also { it.start() }
-        Log.i(TAG, "FollowHuman started")
+        }
     }
 
     fun stopFollowHuman() {
         if (currentMode.get() != RobotMode.FOLLOW_HUMAN) return
-        lockedHuman = null
-        unlockTimerTask?.cancel()
-        unlockTimerTask = null
-        followHuman?.stop()
-        followHuman = null
-        setMode(RobotMode.IDLE)
+        managerScope.launch {
+            modeMutex.withLock {
+                if (currentMode.get() == RobotMode.FOLLOW_HUMAN) {
+                    lockedHuman = null
+                    unlockTimerTask?.cancel()
+                    unlockTimerTask = null
+                    followHuman?.stop()
+                    followHuman = null
+                    setMode(RobotMode.IDLE)
+                    Log.i(TAG, "FollowHuman stopped safely")
+                }
+            }
+        }
     }
-
     fun startVisualServoing(label: String) = startVisualServoing(listOf(label))
 
     fun startVisualServoing(labels: List<String>) {
-        if (!switchMode(RobotMode.VISUAL_SERVOING)) return
-        holdForServoing()
-        servoingController.startTracking(
-            cameraController    = cameraController,
-            detectionController = detectionController,
-            labels              = labels
-        )
-        listener?.onServoingStarted(labels)
-        Log.i(TAG, "VisualServoing started for $labels")
+        managerScope.launch {
+            modeMutex.withLock {
+                if (!switchModeAsync(RobotMode.VISUAL_SERVOING)) return@withLock
+
+                holdForServoing()
+                servoingController.startTracking(cameraController, detectionController, labels)
+
+                withContext(Dispatchers.Main) { listener?.onServoingStarted(labels) }
+                Log.i(TAG, "VisualServoing started for $labels")
+            }
+        }
     }
 
     fun stopVisualServoing() {
         if (currentMode.get() != RobotMode.VISUAL_SERVOING) return
-        servoingController.stopTracking()
-        releaseForServoing()
-        setMode(RobotMode.IDLE)
-        listener?.onServoingStopped()
+        managerScope.launch {
+            modeMutex.withLock {
+                if (currentMode.get() == RobotMode.VISUAL_SERVOING) {
+                    cleanStopServoing()
+                    withContext(Dispatchers.Main) { listener?.onServoingStopped() }
+                }
+            }
+        }
     }
     fun processSnapshot(
         onBitmap: (Bitmap) -> Unit,
@@ -272,22 +316,40 @@ class RobotManager(
     }
 
     fun stopAll() {
-        when (currentMode.get()) {
-            RobotMode.FOLLOW_HUMAN    -> { followHuman?.stop(); followHuman = null }
-            RobotMode.VISUAL_SERVOING -> { servoingController.stopTracking();releaseForServoing(); listener?.onServoingStopped() }
-            RobotMode.IDLE            -> { }
+        managerScope.launch {
+            modeMutex.withLock {
+                Log.i(TAG, "stopAll invoked via Mutex")
+                when (currentMode.get()) {
+                    RobotMode.FOLLOW_HUMAN -> {
+                        followHuman?.stop()
+                        followHuman = null
+                    }
+                    RobotMode.VISUAL_SERVOING -> {
+                        cleanStopServoing()
+                        withContext(Dispatchers.Main) { listener?.onServoingStopped() }
+                    }
+                    RobotMode.IDLE -> { }
+                }
+                setMode(RobotMode.IDLE)
+                movementController.stopMovement()
+                Log.i(TAG, "stopAll completed successfully")
+            }
         }
-        setMode(RobotMode.IDLE)
-        movementController.stopMovement()
-        Log.i(TAG, "stopAll")
     }
-    private fun switchMode(newMode: RobotMode): Boolean {
+
+    private suspend fun switchModeAsync(newMode: RobotMode): Boolean {
         val old = currentMode.get()
         if (old == newMode) { Log.w(TAG, "Already in $newMode"); return false }
         when (old) {
-            RobotMode.FOLLOW_HUMAN    -> { followHuman?.stop(); followHuman = null }
-            RobotMode.VISUAL_SERVOING -> { servoingController.stopTracking(); listener?.onServoingStopped() }
-            RobotMode.IDLE            -> { }
+            RobotMode.FOLLOW_HUMAN -> {
+                followHuman?.stop()
+                followHuman = null
+            }
+            RobotMode.VISUAL_SERVOING -> {
+                cleanStopServoing()
+                withContext(Dispatchers.Main) { listener?.onServoingStopped() }
+            }
+            RobotMode.IDLE -> { }
         }
         setMode(newMode)
         return true
