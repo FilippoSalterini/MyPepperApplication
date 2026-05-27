@@ -3,9 +3,9 @@ package com.example.mypepperapplication.controllers
 import android.util.Log
 import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
-import com.aldebaran.qi.sdk.builder.LookAtBuilder
 import com.aldebaran.qi.sdk.builder.TransformBuilder
-import com.aldebaran.qi.sdk.`object`.actuation.LookAt
+import com.aldebaran.qi.sdk.builder.LookAtBuilder
+import com.aldebaran.qi.sdk.`object`.actuation.FreeFrame
 import com.aldebaran.qi.sdk.`object`.actuation.LookAtMovementPolicy
 // ===========================================================================
 // HEAD MOVEMENT CONTROLLER
@@ -19,55 +19,55 @@ private const val TAG = "HeadController"
 class HeadMovementController {
 
     private var qiContext: QiContext? = null
-
     private var currentLookAtFuture: Future<Void>? = null
+    private var gazeFreeFrame: FreeFrame? = null
 
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
         Log.d(TAG, "HeadController ready.")
     }
 
-    fun onRobotLost() {
-        stopGaze()
-        qiContext = null
-    }
+    fun onRobotLost() { stopGaze(); qiContext = null }
+
     fun setGaze(normErrX: Float = 0f, normErrY: Float = 0f) {
-        val ctx = qiContext ?: run { Log.w(TAG, "QiContext null — skip gaze"); return }
+        val ctx = qiContext ?: return
 
-        try {
-            currentLookAtFuture?.requestCancellation()
-            currentLookAtFuture = null
+        val lateral = clampLateral(-normErrX * 1.2f).toDouble()
+        val thetaHeight = (-normErrY * 0.5f).toDouble()
 
-            val lateral = clamp(-normErrX * 1.2f, -1.5f, 1.5f).toDouble()
+        val transform = TransformBuilder.create().from2DTransform(0.8, lateral, thetaHeight)
 
-            val transform  = TransformBuilder.create().from2DTransform(2.0, lateral, 0.0)
-            val robotFrame = ctx.actuation.robotFrame()
-            val freeFrame  = ctx.mapping.makeFreeFrame()
-            freeFrame.update(robotFrame, transform, System.currentTimeMillis())
+        val robotFrame = ctx.actuation.robotFrame()
+        val localFrame = gazeFreeFrame
 
-            val lookAt: LookAt = LookAtBuilder.with(ctx)
-                .withFrame(freeFrame.frame())
+        if (localFrame == null || currentLookAtFuture?.isDone == true) {
+            val newFrame = ctx.mapping.makeFreeFrame()
+            newFrame.update(robotFrame, transform, System.currentTimeMillis())
+            gazeFreeFrame = newFrame
+
+            val lookAt = LookAtBuilder.with(ctx)
+                .withFrame(newFrame.frame())
                 .build()
             lookAt.policy = LookAtMovementPolicy.HEAD_ONLY
             currentLookAtFuture = lookAt.async().run() as Future<Void>
-
-            Log.v(TAG, "Gaze → lateral=%.2f (normErrX=%.2f)".format(lateral, normErrX))
-
-        } catch (e: Exception) {
-            Log.e(TAG, "setGaze error: ${e.message}")
+            Log.d(TAG, "LookAt started")
+        } else {
+            localFrame.update(robotFrame, transform, System.currentTimeMillis())
         }
+
+        Log.v(TAG, "Gaze → lateral=%.2f, thetaHeight=%.2f".format(lateral, thetaHeight))
     }
 
     fun resetHead() = setGaze(0f, 0f)
 
     fun stopGaze() {
-        try {
-            currentLookAtFuture?.requestCancellation()
-        } catch (e: Exception) {
-            Log.w(TAG, "stopGaze: ${e.message}")
-        }
+        currentLookAtFuture?.requestCancellation()
         currentLookAtFuture = null
+        gazeFreeFrame = null
     }
-    private fun clamp(v: Float, min: Float, max: Float) =
-        if (v < min) min else if (v > max) max else v
+
+    // CLAMPING LATERALE serve per limitare valori di lateral tra -1.5 e 1.5
+    // ed evita che si presentino valori di lateral troppo grandi
+    private fun clampLateral(v: Float) =
+        if (v < -1.5f) -1.5f else if (v > 1.5f) 1.5f else v
 }
