@@ -311,18 +311,51 @@ class VisualServoingController(
                 lastArea = area
 
                 if (stallFrames > stallMaxFrames) {
-                    Log.i(TAG, "APPROACH STALL — target reached by proximity")
+                    Log.i(TAG, "APPROACH STALL — target reached by proximity (rawErrX=%.3f)".format(rawErrX))
+
                     movementController.stopMovement()
-                    delay(300L)
+                    delay(600L) // Stessa sicurezza di 600ms
+
+                    if (abs(rawErrX) > 0.08f) {
+                        Log.i(TAG, "FINAL ALIGNMENT (Stall) rawErrX=%.3f".format(rawErrX))
+                        val theta = (-kpRotation * rawErrX * 0.5f)
+                            .coerceIn(-0.15f, 0.15f)
+                            .toDouble()
+
+                        try {
+                            movementController.rotateAwait(theta = theta, maxSpeed = 0.2f)
+                            delay(400L)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Errore durante il micro-centraggio in stall: ${e.message}")
+                        }
+                    }
+
                     headController.resetHead()
                     listener?.onObjectReached(target.label, target)
                     return@launch
                 }
 
                 if (area >= targetArea) {
-                    Log.i(TAG, "APPROACH DONE — area=%.4f >= target=%.4f".format(area, targetArea))
+                    Log.i(TAG, "APPROACH DONE — area=%.4f >= target=%.4f rawErrX=%.3f".format(area, targetArea, rawErrX))
+
                     movementController.stopMovement()
-                    delay(400L)
+                    delay(600L) // Portato a 600ms per garantire il rilascio delle risorse di movimento
+
+                    // Micro-centraggio finale se siamo arrivati angolati
+                    if (abs(rawErrX) > 0.08f) {
+                        Log.i(TAG, "FINAL ALIGNMENT (Done) rawErrX=%.3f".format(rawErrX))
+                        val theta = (-kpRotation * rawErrX * 0.5f)
+                            .coerceIn(-0.15f, 0.15f)
+                            .toDouble()
+
+                        try {
+                            movementController.rotateAwait(theta = theta, maxSpeed = 0.2f)
+                            delay(400L) // Pausa per stabilizzare l'immagine dopo la rotazione
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Errore durante il micro-centraggio finale: ${e.message}")
+                        }
+                    }
+
                     headController.resetHead()
                     listener?.onObjectReached(target.label, target)
                     return@launch
