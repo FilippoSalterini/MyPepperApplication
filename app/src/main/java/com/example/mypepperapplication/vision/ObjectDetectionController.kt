@@ -1,5 +1,6 @@
 package com.example.mypepperapplication.vision
 
+import androidx.core.graphics.scale
 import android.graphics.Bitmap
 import android.graphics.RectF
 import android.util.Log
@@ -79,6 +80,7 @@ class ObjectDetectionController {
     fun detect(bitmap: Bitmap, callback: DetectionCallback) {
         if (!detectionRunning.compareAndSet(false, true)) {
             Log.v(TAG, "Detection skipped: previous request still running")
+            callback.onDetections(emptyList(), bitmap.width, bitmap.height)
             return
         }
 
@@ -184,8 +186,24 @@ class ObjectDetectionController {
     private fun fallback(): List<BoundingBox> = emptyList()
 
     private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
+        val maxDim = 640f
+        val scaleFactor = maxDim / bitmap.width.coerceAtLeast(bitmap.height)
+        val resizedBitmap = if (scaleFactor < 1f) {
+            bitmap.scale(
+                (bitmap.width * scaleFactor).toInt(),
+                (bitmap.height * scaleFactor).toInt(),
+                filter = true
+            )
+        } else {
+            bitmap
+        }
+
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        resizedBitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+
+        if (resizedBitmap != bitmap) {
+            resizedBitmap.recycle() // Evitiamo memory leak
+        }
         return out.toByteArray()
     }
 }

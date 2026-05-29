@@ -33,54 +33,6 @@ class PepperMovementController {
         stopMovement()
         qiContext = null
     }
-
-//    suspend fun cancelAndMoveAwait(x: Double = 0.0, theta: Double = 0.0) {
-//        if (x == 0.0 && theta == 0.0) return
-//        val ctx = qiContext ?: run { Log.e(TAG, "cancelAndMoveAwait: QiContext NULL"); return }
-//        Log.i(TAG, "cancelAndMoveAwait: x=$x theta=$theta")
-//
-//        // Cancellazione preventiva immediata
-//        currentGoToFuture?.requestCancellation()
-//        currentGoToFuture = null
-//
-//        val robotFrame = ctx.actuation.robotFrame()
-//        val transform  = buildTransform(x, theta)
-//        val freeFrame  = ctx.mapping.makeFreeFrame()
-//        freeFrame.update(robotFrame, transform, System.currentTimeMillis())
-//
-//        suspendCancellableCoroutine { cont ->
-//            val future = GoToBuilder.with(ctx)
-//                .withFrame(freeFrame.frame())
-//                .withMaxSpeed(0.35f)
-//                .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-//                .build()
-//                .async().run()
-//
-//            currentGoToFuture = future
-//
-//            future.thenConsume { f ->
-//                // FIX APPLICATO: Resetta a null SOLO se un nuovo movimento non ha già sovrascritto il puntatore
-//                if (currentGoToFuture == future) {
-//                    currentGoToFuture = null
-//                }
-//
-//                when {
-//                    f.isSuccess   -> { Log.i(TAG, "cancelAndMoveAwait ✓ x=$x theta=$theta"); if (cont.isActive) cont.resume(Unit) }
-//                    f.isCancelled -> { Log.i(TAG, "cancelAndMoveAwait cancelled");             if (cont.isActive) cont.resume(Unit) }
-//                    f.hasError()  -> {
-//                        Log.e(TAG, "cancelAndMoveAwait ERROR: ${f.errorMessage}")
-//                        // FIX APPLICATO: Gestione del backoff asincrona tramite coroutine, senza bloccare il thread C++
-//                        CoroutineScope(Dispatchers.Default).launch {
-//                            delay(300L)
-//                            if (cont.isActive) cont.resume(Unit)
-//                        }
-//                    }
-//                }
-//            }
-//            cont.invokeOnCancellation { future.requestCancellation() }
-//        }
-//    }
-
     suspend fun rotateAwait(theta: Double, maxSpeed: Float = 0.3f) {
         if (theta == 0.0) return
         val ctx = qiContext ?: run { Log.e(TAG, "rotateAwait: QiContext NULL"); return }
@@ -171,11 +123,11 @@ class PepperMovementController {
         }
     }
 
-    private fun buildTransform(x: Double, theta: Double): Transform {
-        return when {
-            x == 0.0     -> TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
-            theta == 0.0 -> TransformBuilder.create().fromXTranslation(x)
-            else         -> TransformBuilder.create().from2DTransform(x, 0.0, theta)
-        }
-    }
+//    private fun buildTransform(x: Double, theta: Double): Transform {
+//        return when {
+//            x == 0.0     -> TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
+//            theta == 0.0 -> TransformBuilder.create().fromXTranslation(x)
+//            else         -> TransformBuilder.create().from2DTransform(x, 0.0, theta)
+//        }
+//    }
 }

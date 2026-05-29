@@ -25,10 +25,10 @@ class VisualServoingController(
     }
 
     // Parametri DA CALIBRARE
-    var targetArea:       Float  = 0.05f //CALIBRA PER AVVICINAMENTO A OGGETTO
+    var targetArea:       Float  = 0.035f //CALIBRA PER AVVICINAMENTO A OGGETTO
     var kpRotation:       Float  = 0.8f
     var maxRotationStep:  Float  = 0.35f
-    var bodyRotationZone: Float  = 0.08f
+    var bodyRotationZone: Float  = 0.12f
     var headOnlyZone:     Float  = 0.05f
     var lpfAlpha:         Float  = 0.5f
     var maxMissedFrames:  Int    = 10
@@ -69,22 +69,20 @@ class VisualServoingController(
     ) {
         require(labels.isNotEmpty()) { "labels cannot be empty" }
         trackingJob?.cancel()
-
         smoothErrX = 0f
         smoothErrY = 0f
+        centeredFrames = 0
+
         Log.i(TAG, "Visual servoing started. Targets=$labels")
 
         trackingJob = scope.launch {
 
             // ── FASE 0: SCAN ──────────────────────────────────────────────────
             Log.i(TAG, "PHASE 0 SCAN — looking for $labels over $scanSteps steps")
+            val halfSteps = scanSteps / 2
             val angles = buildList {
-                repeat(scanSteps / 2) { _ ->
-                    add(scanStepRad + (Math.random() * 0.04 - 0.02))
-                }
-                repeat(scanSteps) { _ ->
-                    add(-scanStepRad + (Math.random() * 0.04 - 0.02))
-                }
+                repeat(halfSteps) { add(scanStepRad + (Math.random() * 0.04 - 0.02)) }   // verso dx
+                repeat(halfSteps) { add(-scanStepRad + (Math.random() * 0.04 - 0.02)) }  // verso sx
             }
 
             var found = false
@@ -122,13 +120,17 @@ class VisualServoingController(
             }
 
             // FASE 1 — centering
-
+            var rotateStallCount = 0
+            var lastRawErrX = 0f
             var nearZoneFrames = 0
-            val nearZoneRequired = 8
+            val nearZoneRequired = 4
             var missedFrames  = 0
             centeredFrames    = 0
             smoothErrX        = 0f
             smoothErrY        = 0f
+
+            headController.stopGaze()
+            //headController.setGaze(normErrX = 0f, normErrY = 0f)
 
             while (isActive) {
                 val bitmap = captureFrame(cameraController)
@@ -151,10 +153,10 @@ class VisualServoingController(
                 val rawErrY = target.cy - 0.5f
 
                 // LPF usato SOLO per la testa, non per decidere se ruotare
-                smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
-                smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
+//                smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
+//                smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
 
-                headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
+//                headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
                 Log.d(TAG, "CENTER [${target.label}] rawErrX=%.3f smoothErrX=%.3f".format(rawErrX, smoothErrX))
 
                 when {
@@ -170,6 +172,7 @@ class VisualServoingController(
                         )
                         if (centeredFrames >= centeredRequired) {
                             Log.i(TAG, "PHASE 1 done — object centered")
+                            headController.stopGaze()
                             break
                         }
                     }
@@ -177,37 +180,60 @@ class VisualServoingController(
                     abs(rawErrX) >= bodyRotationZone -> {
                         centeredFrames = 0
                         nearZoneFrames = 0
-                        // Proporzionale al RAW — più aggressivo per errori grandi
+
+                        if (abs(rawErrX - lastRawErrX) < 0.01f) {
+                            rotateStallCount++
+                            Log.w(TAG, "ROTATE STALL $rotateStallCount rawErrX=%.3f".format(rawErrX))
+                            if (rotateStallCount >= 4) {
+                                Log.w(TAG, "ROTATE STALL MAX — forcing PHASE 2")
+                                headController.stopGaze()
+                                break
+                            }
+                        } else {
+                            rotateStallCount = 0
+                        }
+                        lastRawErrX = rawErrX
+
                         val theta = (-kpRotation * rawErrX)
                             .coerceIn(-maxRotationStep, maxRotationStep).toDouble()
                         Log.i(TAG, "ROTATE theta=%.3f rawErrX=%.3f".format(theta, rawErrX))
-
                         headController.stopGaze()
                         movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
-
-                        // Reset completo del filtro — ripartiamo dalla detection pulita
                         smoothErrX = 0f
                         smoothErrY = 0f
                     }
 
                     else -> {
-                        // Near-zone stabile: dopo N frame consecutivi, accetta come "abbastanza centrato"
-                        nearZoneFrames++
-                        Log.d(
-                            TAG,
-                            "CENTER near-zone rawErrX=%.3f frame $nearZoneFrames/$nearZoneRequired".format(
-                                rawErrX
-                            )
-                        )
-                        if (nearZoneFrames >= nearZoneRequired) {
-                            Log.i(TAG, "PHASE 1 done — near-zone stable ($nearZoneRequired frames)")
-                            break
+                        val nearZoneMaxErr = bodyRotationZone * 0.85f
+
+                        if (abs(rawErrX) > nearZoneMaxErr) {
+                            centeredFrames = 0
+                            nearZoneFrames = 0
+
+                            val rawTheta = -kpRotation * rawErrX * 0.6f
+                            val theta = if (abs(rawTheta) < 0.06f) {
+                                if (rawTheta >= 0) 0.06 else -0.06
+                            } else {
+                                rawTheta.coerceIn(-maxRotationStep * 0.5f, maxRotationStep * 0.5f).toDouble()
+                            }
+
+                            Log.i(TAG, "NEAR-ZONE CORRECTION theta=%.3f rawErrX=%.3f".format(theta, rawErrX))
+                            headController.stopGaze()
+                            movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
+                            smoothErrX = 0f
+                            smoothErrY = 0f
+                        } else {
+                            nearZoneFrames++
+                            Log.d(TAG, "CENTER near-zone rawErrX=%.3f frame $nearZoneFrames/$nearZoneRequired".format(rawErrX))
+                            if (nearZoneFrames >= nearZoneRequired) {
+                                Log.i(TAG, "PHASE 1 done — near-zone stable ($nearZoneRequired frames)")
+                                headController.stopGaze()
+                                break
+                            }
                         }
-                    }
-                }
+                    }                }
                 delay(cycleDelayMs)
             }
-
             if (!isActive) return@launch
 
             // ── FASE 2: APPROCCIO CONTINUO ────────────────────────────────────────
@@ -215,13 +241,26 @@ class VisualServoingController(
             missedFrames = 0
             var stallFrames = 0
             var lastArea    = 0f
+
+            headController.stopGaze()  // testa fissa — NON richiamare setGaze dentro il loop
             movementController.moveTowardAsync(distanceMeters = 3.0)
+            delay(200L)
 
             while (isActive) {
                 delay(300L)
 
-                val bitmap  = captureFrame(cameraController)
-                val target  = runDetection(detectionController, bitmap).bestMatch(labels)
+                val bitmap = captureFrame(cameraController)
+
+                val target = runDetection(detectionController, bitmap)
+                    .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
+                    .let { boxes ->
+                        if (lastArea > 0f && boxes.size > 1) {
+                            // Preferisci il box con area più simile all'ultima vista
+                            boxes.minByOrNull { abs(it.rect.width() * it.rect.height() - lastArea) }
+                        } else {
+                            boxes.maxByOrNull { it.score }
+                        }
+                    }
 
                 if (target == null) {
                     missedFrames++
@@ -238,27 +277,36 @@ class VisualServoingController(
 
                 val rawErrX = target.cx - 0.5f
                 val rawErrY = target.cy - 0.5f
-                smoothErrX  = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
-                smoothErrY  = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
+                // Aggiorna il filtro ma NON usarlo per nulla in FASE 2 —
+                // serve solo per avere un valore iniziale sensato se si torna in FASE 1
+                smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
+                smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
 
                 val area = target.rect.width() * target.rect.height()
-                Log.d(TAG, "APPROACH [${target.label}] area=%.4f target=%.4f errX=%.3f".format(area, targetArea, smoothErrX))
+                Log.d(TAG, "APPROACH [${target.label}] area=%.4f target=%.4f rawErrX=%.3f"
+                    .format(area, targetArea, rawErrX))
 
-                headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
+                // ← RIMOSSA headController.setGaze() — testa resta ferma, rawErrX è onesto
 
-                if (abs(smoothErrX) > approachCorrectionZone) {
-                    Log.i(TAG, "APPROACH correction rotate smoothErrX=%.3f".format(smoothErrX))
+                // Correzione laterale: usa rawErrX (non smoothErrX) per la soglia E per il theta
+                if (abs(rawErrX) > approachCorrectionZone) {
+                    Log.i(TAG, "APPROACH correction rotate rawErrX=%.3f".format(rawErrX))
                     movementController.stopMovement()
-                    headController.stopGaze() // FIX: Suspend call
-                    val theta = (-kpRotation * smoothErrX)
+                    delay(600L)
+
+                    val theta = (-kpRotation * rawErrX)  // ← rawErrX, non smoothErrX
                         .coerceIn(-maxRotationStep, maxRotationStep).toDouble()
-                    movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
-                    smoothErrX *= 0.5f
-                    headController.stopGaze() // FIX: Suspend call
+                    movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
+
+                    smoothErrX = rawErrX * 0.5f
+                    smoothErrY = rawErrY * 0.5f
+
                     movementController.moveTowardAsync(distanceMeters = 3.0)
+                    delay(500L)
                     continue
                 }
 
+                // Stall detector
                 if (abs(area - lastArea) < stallThreshold) stallFrames++ else stallFrames = 0
                 lastArea = area
 
@@ -266,9 +314,7 @@ class VisualServoingController(
                     Log.i(TAG, "APPROACH STALL — target reached by proximity")
                     movementController.stopMovement()
                     delay(300L)
-                    headController.stopGaze() // FIX: Suspend call
-                    delay(200L)
-                    headController.resetHead() // FIX: Suspend call
+                    headController.resetHead()
                     listener?.onObjectReached(target.label, target)
                     return@launch
                 }
@@ -276,8 +322,8 @@ class VisualServoingController(
                 if (area >= targetArea) {
                     Log.i(TAG, "APPROACH DONE — area=%.4f >= target=%.4f".format(area, targetArea))
                     movementController.stopMovement()
-                    delay(200L)
-                    headController.resetHead() // FIX: Suspend call
+                    delay(400L)
+                    headController.resetHead()
                     listener?.onObjectReached(target.label, target)
                     return@launch
                 }
@@ -308,7 +354,7 @@ class VisualServoingController(
         // Arrestiamo la base
         movementController.stopMovement()
 
-        // Sostituito Thread.sleep con delay asincrono non-bloccante
+        // delay asincrono non-bloccante
         delay(250L)
 
         // Spegniamo lo sguardo asincrono della testa
