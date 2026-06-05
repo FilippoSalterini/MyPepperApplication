@@ -1,4 +1,4 @@
-package com.example.mypepperapplication
+package com.example.mypepperapplication.core
 
 import android.graphics.Bitmap
 import android.util.Log
@@ -19,6 +19,8 @@ import kotlin.math.sqrt
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.Timer
+import java.util.TimerTask
 
 // =============================================================================
 // RobotManager
@@ -82,8 +84,8 @@ class RobotManager(
     }
     // locked human
     private var lockedHuman: Human? = null
-    private var unlockTimerTask: java.util.TimerTask? = null
-    private val unlockTimer = java.util.Timer()
+    private var unlockTimerTask: TimerTask? = null
+    private val unlockTimer = Timer()
 
     private var followHuman: FollowHuman? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
@@ -224,7 +226,7 @@ class RobotManager(
         val delayMs = if (currentMode.get() == RobotMode.FOLLOW_HUMAN) 5000L else 3000L
 
         Log.d(TAG, "Human lost — scheduling unlock in ${delayMs}ms")
-        unlockTimerTask = object : java.util.TimerTask() {
+        unlockTimerTask = object : TimerTask() {
             override fun run() {
                 unlockTimerTask = null
                 Log.i(TAG, "Unlock: locked human gone — stopping follow")

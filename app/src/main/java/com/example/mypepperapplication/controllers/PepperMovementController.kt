@@ -5,7 +5,6 @@ import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.builder.GoToBuilder
 import com.aldebaran.qi.sdk.builder.TransformBuilder
-import com.aldebaran.qi.sdk.`object`.geometry.Transform
 import com.aldebaran.qi.sdk.`object`.actuation.OrientationPolicy
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
@@ -122,12 +121,4 @@ class PepperMovementController {
             currentGoToFuture = null
         }
     }
-
-//    private fun buildTransform(x: Double, theta: Double): Transform {
-//        return when {
-//            x == 0.0     -> TransformBuilder.create().from2DTransform(0.0, 0.0, theta)
-//            theta == 0.0 -> TransformBuilder.create().fromXTranslation(x)
-//            else         -> TransformBuilder.create().from2DTransform(x, 0.0, theta)
-//        }
-//    }
 }

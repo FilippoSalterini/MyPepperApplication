@@ -7,7 +7,7 @@ import com.aldebaran.qi.sdk.builder.TransformBuilder
 import com.aldebaran.qi.sdk.builder.LookAtBuilder
 import com.aldebaran.qi.sdk.`object`.actuation.FreeFrame
 import com.aldebaran.qi.sdk.`object`.actuation.LookAtMovementPolicy
-import kotlinx.coroutines.delay // Importante per il delay asincrono
+import kotlinx.coroutines.delay
 
 // ===========================================================================
 // HEAD MOVEMENT CONTROLLER
@@ -96,9 +96,6 @@ class HeadMovementController {
         }
     }
 
-    /**
-     * FIX: Diventa suspend fun. Rilascia la testa in modo non bloccante.
-     */
     suspend fun stopGaze() {
         if (currentLookAtFuture == null) return
 
@@ -109,8 +106,6 @@ class HeadMovementController {
             Log.w(TAG, "stopGaze cancel error: ${e.message}")
         }
 
-        // FIX: Sostituito Thread.sleep con delay asincrono.
-        // Lascia respirare il modulo di animazione nativa della testa di Pepper.
         delay(150L)
 
         currentLookAtFuture = null
@@ -118,10 +113,6 @@ class HeadMovementController {
         Log.d(TAG, "Gaze stopped cleanly.")
     }
 
-    /**
-     * FIX: Diventa suspend fun perché invoca internamente stopGaze().
-     * Riporta la testa in posizione centrale avanti.
-     */
     suspend fun resetHead() {
         val ctx = qiContext ?: run {
             Log.d(TAG, "resetHead: QiContext null, skipping")

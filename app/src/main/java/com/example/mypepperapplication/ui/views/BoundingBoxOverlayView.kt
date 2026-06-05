@@ -1,4 +1,4 @@
-package com.example.mypepperapplication.views
+package com.example.mypepperapplication.ui.views
 
 import android.content.Context
 import android.graphics.Canvas

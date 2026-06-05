@@ -6,7 +6,7 @@ import android.util.Log
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
-import com.example.mypepperapplication.RobotMode
+import com.example.mypepperapplication.core.RobotMode
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.vision.BoundingBox
 // ===========================================================================
