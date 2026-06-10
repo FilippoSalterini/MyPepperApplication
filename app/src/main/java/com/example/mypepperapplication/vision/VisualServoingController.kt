@@ -44,7 +44,7 @@ class VisualServoingController(
 
     // Stall detector
     private val stallThreshold = 0.003f
-    private val stallMaxFrames = 6
+    private val stallMaxFrames = 8
     var scanDelayMs:        Long   = 300L
 
     var listener: VisualServoingListener? = null
@@ -122,6 +122,13 @@ class VisualServoingController(
             }
 
             // ── FASE 1: CENTRAGGIO DI PRECISIONE ──────────────────────────────
+            /*
+            - rotate stall count rete di sicurezza, se robot si trova in una situazione di
+            microscatti inifiniti causa rumore pixel il codice non si frezza ma porosegue
+            alla fase 2
+            - utilizzo di un LPF che serve per atteuare il jitter della bb di yolo,
+            permettendo ai comandi inviati alla testa di essere morbidi
+             */
             var rotateStallCount = 0
             var lastRawErrX = 0f
             var nearZoneFrames = 0
@@ -236,6 +243,10 @@ class VisualServoingController(
             if (!isActive) return@launch
 
             // ── FASE 2: APPROCCIO CONTINUO BILANCIATO ─────────────────────────
+            /*
+            Fase da fixare per quanto riguarda la gestione degli errori per l approccio
+            continuo
+             */
             Log.i(TAG, "PHASE 2 — continuous approach")
             missedFrames = 0
             var stallFrames = 0
@@ -283,22 +294,33 @@ class VisualServoingController(
                 smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
                 smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
 
-                headController.setGaze(normErrX = rawErrX, normErrY = rawErrY)
+                headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
 
                 val area = target.rect.width() * target.rect.height()
                 Log.d(TAG, "APPROACH [${target.label}] area=%.4f target=%.4f rawErrX=%.3f".format(area, targetArea, rawErrX))
 
-                if (abs(rawErrX) > approachCorrectionZone) {
+                if (abs(smoothErrX) > approachCorrectionZone) {
                     Log.i(TAG, "APPROACH correction rotate rawErrX=%.3f. Stopping layout engines...".format(rawErrX))
 
                     movementController.stopMovement()
 
                     headController.stopGaze()
-                    delay(300L)
+                    delay(400L)
 
                     val theta = (-kpRotation * rawErrX).coerceIn(-maxRotationStep, maxRotationStep).toDouble()
-                    movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
-
+                    // retry in caso di "Move task not started"
+                    var rotated = false
+                    repeat(2) {
+                        if (!rotated) {
+                            try {
+                                movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
+                                rotated = true
+                            } catch (e: Exception) {
+                                Log.w(TAG, "rotateAwait failed, retrying after delay: ${e.message}")
+                                delay(300L)
+                            }
+                        }
+                    }
                     smoothErrX = 0f
                     smoothErrY = 0f
 
@@ -361,7 +383,11 @@ class VisualServoingController(
         if (trackingJob?.isActive == true) {
             Log.i(TAG, "Requesting tracking job cancellation...")
             trackingJob?.cancel()
-            try { trackingJob?.join() } catch (e: Exception) { Log.w(TAG, "Error joining job: ${e.message}") }
+            try {
+                withTimeoutOrNull(500L) { trackingJob?.join() }
+            } catch (e: Exception) {
+             // try { trackingJob?.join() } catch (e: Exception) {
+                Log.w(TAG, "Error joining job: ${e.message}") }
         }
         trackingJob = null
         movementController.stopMovement()

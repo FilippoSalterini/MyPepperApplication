@@ -69,11 +69,20 @@ class ObjectDetectionController {
     // OkHttpClient configurato localmente, ma idealmente (appunto in questo
     // progetto non risulta essere limitante siccome obj det controller
     // viene creato una sola volta) dovrebbe essere un singleton applicativo.
+//    private val httpClient by lazy {
+//        OkHttpClient.Builder()
+//            .connectTimeout(2, TimeUnit.SECONDS)
+//            .readTimeout(2, TimeUnit.SECONDS)
+//            .callTimeout(3, TimeUnit.SECONDS)
+//            .build()
+//    }
+
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(2, TimeUnit.SECONDS)
-            .readTimeout(2, TimeUnit.SECONDS)
-            .callTimeout(3, TimeUnit.SECONDS)
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(7, TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(1, 30, TimeUnit.SECONDS))
             .build()
     }
 

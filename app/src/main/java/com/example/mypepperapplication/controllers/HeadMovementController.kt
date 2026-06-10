@@ -43,7 +43,7 @@ class HeadMovementController {
         normErrY: Float,
         scanMode: Boolean = false
     ) = run {
-        val lateral = clampLateral(-normErrX * 1.3f).toDouble()
+        val lateral = clampLateral(-normErrX * 1.0f).toDouble() //prima era -normerrx * 1.3f
 
         // Distanza avanti: più grande = testa più alta
         val forward = if (scanMode) {
