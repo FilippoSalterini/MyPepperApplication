@@ -36,7 +36,7 @@ The project combines **computer vision**, **robot navigation**, and **human-robo
 - Distance estimation
 - Obstacle-aware navigation
 - Recovery from navigation failures
-
+- The current code was written starting from a reference code ( "https://github.com/softbankrobotics-labs/pepper-follow-me.git" ) modified and adapted to the project
 ### 🎯 Visual Servoing
 
 - Scene scanning
