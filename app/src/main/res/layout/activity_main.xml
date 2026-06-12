@@ -5,7 +5,6 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- Camera preview fullscreen -->
     <ImageView
         android:id="@+id/ivCameraPreview"
         android:layout_width="match_parent"
@@ -13,10 +12,6 @@
         android:background="#111111"
         android:contentDescription="@string/camerapreview"
         android:scaleType="centerCrop" />
-
-    <!-- Bounding box overlay -->
-
-    <!-- Top status bar -->
 
     <com.example.mypepperapplication.ui.views.BoundingBoxOverlayView
         android:id="@+id/overlayView"
@@ -64,7 +59,6 @@
 
     </LinearLayout>
 
-    <!-- Bottom control bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -76,7 +70,6 @@
         android:paddingTop="12dp"
         android:paddingBottom="12dp">
 
-        <!-- Spinner selection label object -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -102,7 +95,32 @@
 
         </LinearLayout>
 
-        <!-- Botton -->
+        <!-- Prima riga bottoni -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btnFollowHuman"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="@string/follow_human" />
+
+            <Button
+                android:id="@+id/btnApproachHuman"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Approach Human" />
+
+        </LinearLayout>
+
+        <!-- Seconda riga bottoni -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -118,14 +136,6 @@
                 android:layout_marginEnd="8dp"
                 android:text="@string/snapshot"
                 android:textColor="#FFFFFF" />
-
-            <Button
-                android:id="@+id/btnFollowHuman"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="8dp"
-                android:text="@string/follow_human" />
 
             <Button
                 android:id="@+id/btnTrack"

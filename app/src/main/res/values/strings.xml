@@ -13,4 +13,5 @@
     <string name="snapshot">Snapshot</string>
     <string name="follow_human">Follow Human</string>
     <string name="track_object">Track Object</string>
+    <string name="approach_human">Approach Human</string>
 </resources>

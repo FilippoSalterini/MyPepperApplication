@@ -8,6 +8,7 @@ import com.aldebaran.qi.sdk.`object`.holder.AutonomousAbilitiesType
 import com.aldebaran.qi.sdk.`object`.holder.Holder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.example.mypepperapplication.controllers.FollowHuman
+import com.example.mypepperapplication.controllers.ApproachHuman
 import com.example.mypepperapplication.controllers.PepperMovementController
 import com.example.mypepperapplication.controllers.HeadMovementController
 import com.example.mypepperapplication.vision.BoundingBox
@@ -88,6 +89,7 @@ class RobotManager(
     private val unlockTimer = Timer()
 
     private var followHuman: FollowHuman? = null
+    private var approachHuman: ApproachHuman? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
     private var qiContext: QiContext? = null
 
@@ -305,6 +307,7 @@ class RobotManager(
             }
         }
     }
+
     fun processSnapshot(
         onBitmap: (Bitmap) -> Unit,
         onDetection: (boxes: List<BoundingBox>, w: Int, h: Int) -> Unit
@@ -316,7 +319,6 @@ class RobotManager(
             }
         }
     }
-
     fun stopAll() {
         managerScope.launch {
             modeMutex.withLock {
@@ -325,6 +327,10 @@ class RobotManager(
                     RobotMode.FOLLOW_HUMAN -> {
                         followHuman?.stop()
                         followHuman = null
+                    }
+                    RobotMode.APPROACH_HUMAN -> {
+                        approachHuman?.stop()
+                        approachHuman = null
                     }
                     RobotMode.VISUAL_SERVOING -> {
                         cleanStopServoing()
@@ -346,6 +352,10 @@ class RobotManager(
             RobotMode.FOLLOW_HUMAN -> {
                 followHuman?.stop()
                 followHuman = null
+            }
+            RobotMode.APPROACH_HUMAN -> {
+                approachHuman?.stop()
+                approachHuman = null
             }
             RobotMode.VISUAL_SERVOING -> {
                 cleanStopServoing()
@@ -373,5 +383,62 @@ class RobotManager(
             val dy = t1.y - t2.y
             sqrt(dx * dx + dy * dy) < 0.5  // stessa persona se entro 50cm RIVEDI
         } catch (_: Exception) { false }
+    }
+
+    /*
+    implementata funzione per approcciare l umano ( diverso da following che puo essere sfruttando per seguire l umanono
+     */
+    fun startApproachHuman() {
+        val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
+
+        managerScope.launch {
+            modeMutex.withLock {
+                if (!switchModeAsync(RobotMode.APPROACH_HUMAN)) return@withLock
+
+                approachHuman = ApproachHuman(
+                    qiContext = ctx,
+                    listener  = object : ApproachHuman.ApproachHumanListener {
+                        override fun onApproachComplete(human: Human) {
+                            managerScope.launch {
+                                modeMutex.withLock {
+                                    approachHuman = null
+                                    setMode(RobotMode.IDLE)
+                                    withContext(Dispatchers.Main) { listener?.onCloseEnoughToHuman() }
+                                }
+                            }
+                        }
+                        override fun onNoHumanFound() {
+                            managerScope.launch {
+                                modeMutex.withLock { setMode(RobotMode.IDLE) }
+                            }
+                        }
+                        override fun onApproachFailed() {
+                            managerScope.launch {
+                                modeMutex.withLock { setMode(RobotMode.IDLE) }
+                            }
+                        }
+                        override fun onDistanceChanged(distance: Double) {
+                            listener?.onDistanceChanged(distance)
+                        }
+                    }
+                ).also { it.start() }
+
+                Log.i(TAG, "ApproachHuman started under Mutex protection")
+            }
+        }
+    }
+
+    fun stopApproachHuman() {
+        if (currentMode.get() != RobotMode.APPROACH_HUMAN) return
+        managerScope.launch {
+            modeMutex.withLock {
+                if (currentMode.get() == RobotMode.APPROACH_HUMAN) {
+                    approachHuman?.stop()
+                    approachHuman = null
+                    setMode(RobotMode.IDLE)
+                    Log.i(TAG, "ApproachHuman stopped safely")
+                }
+            }
+        }
     }
 }

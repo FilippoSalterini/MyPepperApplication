@@ -31,7 +31,8 @@ class UiController(
     var onTrackObject: ((label: String) -> Unit)? = null
     var onStopTracking: (() -> Unit)? = null
     var onSnapshot: (() -> Unit)? = null
-
+    var onApproachHuman: (() -> Unit)? = null
+    var onStopApproachHuman: (() -> Unit)? = null
     val selectedLabel: String
         get() = binding.spinnerLabel.selectedItem as? String ?: searchableLabels.first()
 
@@ -68,6 +69,14 @@ class UiController(
                 onTrackObject?.invoke(selectedLabel)
             }
         }
+
+        binding.btnApproachHuman.setOnClickListener {
+            if (binding.btnApproachHuman.tag == RobotMode.APPROACH_HUMAN) {
+                onStopApproachHuman?.invoke()
+            } else {
+                onApproachHuman?.invoke()
+            }
+        }
     }
 
     fun updateForMode(mode: RobotMode) {
@@ -80,6 +89,8 @@ class UiController(
                 binding.btnTrack.tag        = RobotMode.IDLE
                 binding.tvStatus.text       = "Idle"
                 binding.spinnerLabel.isEnabled = true
+                binding.btnApproachHuman.text = "Approach Human"
+                binding.btnApproachHuman.tag  = RobotMode.IDLE
             }
             RobotMode.FOLLOW_HUMAN -> {
                 binding.btnFollowHuman.text = "Stop Following"
@@ -88,6 +99,8 @@ class UiController(
                 binding.btnTrack.tag        = RobotMode.IDLE
                 binding.tvStatus.text       = "Follow Human (SDK)"
                 binding.spinnerLabel.isEnabled = false
+                binding.btnApproachHuman.text = "Approach Human"
+                binding.btnApproachHuman.tag  = RobotMode.IDLE
             }
             RobotMode.VISUAL_SERVOING -> {
                 binding.btnFollowHuman.text = "Follow Human"
@@ -95,6 +108,18 @@ class UiController(
                 binding.btnTrack.text       = "Stop Tracking"
                 binding.btnTrack.tag        = RobotMode.VISUAL_SERVOING
                 binding.tvStatus.text       = "Visual Servoing — $selectedLabel"
+                binding.spinnerLabel.isEnabled = false
+                binding.btnApproachHuman.text = "Approach Human"
+                binding.btnApproachHuman.tag  = RobotMode.IDLE
+            }
+            RobotMode.APPROACH_HUMAN -> {
+                binding.btnFollowHuman.text = "Follow Human"
+                binding.btnFollowHuman.tag  = RobotMode.IDLE
+                binding.btnApproachHuman.text = "Stop Approach"
+                binding.btnApproachHuman.tag  = RobotMode.APPROACH_HUMAN
+                binding.btnTrack.text       = "Track Object"
+                binding.btnTrack.tag        = RobotMode.IDLE
+                binding.tvStatus.text       = "Approaching Human…"
                 binding.spinnerLabel.isEnabled = false
             }
         }

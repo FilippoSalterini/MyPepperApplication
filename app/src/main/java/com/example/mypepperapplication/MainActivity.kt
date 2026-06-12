@@ -79,10 +79,16 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
                 onNoHumanFound = { ui { ui.showToast("No human detected") } }
             )
         }
+        ui.onApproachHuman = {
+            ui { ui.showToast("Searching for human…") }
+            robotManager.startApproachHuman()
+        }
+        ui.onStopApproachHuman = { robotManager.stopApproachHuman() }
         ui.onStopFollowHuman = { robotManager.stopFollowHuman() }
 
         ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
         ui.onStopTracking = { robotManager.stopVisualServoing() }
+
 
         // [5] Snapshot: nessun callback annidato in Activity.
         ui.onSnapshot = {

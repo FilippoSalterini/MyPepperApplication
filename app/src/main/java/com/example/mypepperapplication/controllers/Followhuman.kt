@@ -24,11 +24,13 @@ import kotlin.math.hypot
  * FollowHuman implementato partendo da https://github.com/softbankrobotics-labs/pepper-follow-me.git
  * modificando e adattando il codice al progetto.
  */
+
 class FollowHuman(
     private val qiContext: QiContext,
     private val humanToFollow: Human,
-    private val followHumanListener: FollowHumanListener? = null
-) {
+    private val followHumanListener: FollowHumanListener? = null,
+    private val closeEnoughDistance: Double = 1.0,
+    private val tooFarDistance: Double = 1.7 ) {
 
     interface FollowHumanListener {
         fun onFollowingHuman()
