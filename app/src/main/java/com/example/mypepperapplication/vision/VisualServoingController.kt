@@ -11,7 +11,9 @@ import kotlin.math.abs
 // ===========================================================================
 // VISUAL SERVOING CONTROLLER
 // ===========================================================================
-
+/*
+Azione strutturata in più fasi per scanning, detecting e approaching object nell ambiente
+ */
 private const val TAG = "VisualServoing"
 
 class VisualServoingController(
@@ -25,13 +27,14 @@ class VisualServoingController(
     }
 
     // Parametri di controllo
-    var targetArea:       Float  = 0.035f
+    var targetArea:       Float  = 0.018f  // 0.035f
     var kpRotation:       Float  = 0.8f
     var maxRotationStep:  Float  = 0.35f
     var bodyRotationZone: Float  = 0.12f
     var headOnlyZone:     Float  = 0.05f
     var lpfAlpha:         Float  = 0.5f
     var maxMissedFrames:  Int    = 10
+    var maxMissedFramesApproach: Int = 5 //CHECK
     var cycleDelayMs:     Long   = 250L
 
     var centeredFrames = 0
@@ -147,7 +150,7 @@ class VisualServoingController(
 
                 if (target == null) {
                     missedFrames++
-                    if (missedFrames >= maxMissedFrames) {
+                    if (missedFrames >= maxMissedFramesApproach) {
                         movementController.stopMovement()
                         headController.resetHead()
                         listener?.onObjectLost(labels)
@@ -202,9 +205,13 @@ class VisualServoingController(
                         headController.stopGaze()
                         delay(200L)
                         movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
-
                         smoothErrX = 0f
                         smoothErrY = 0f
+
+                        //
+                        headController.setGaze(normErrX = 0f, normErrY = -0.1f)
+                        delay(300L)
+
                     }
 
                     else -> {
@@ -215,8 +222,8 @@ class VisualServoingController(
                             nearZoneFrames = 0
 
                             val rawTheta = -kpRotation * rawErrX * 0.6f
-                            val theta = if (abs(rawTheta) < 0.06f) {
-                                if (rawTheta >= 0) 0.06 else -0.06
+                            val theta = if (abs(rawTheta) < 0.10f) {
+                                if (rawTheta >= 0) 0.10 else -0.10
                             } else {
                                 rawTheta.coerceIn(-maxRotationStep * 0.5f, maxRotationStep * 0.5f).toDouble()
                             }
@@ -251,13 +258,9 @@ class VisualServoingController(
             missedFrames = 0
             var stallFrames = 0
             var lastArea    = 0f
+            var slowApproachStarted = false
 
-            smoothErrX = 0f
-            smoothErrY = 0f
-            headController.stopGaze()
-            delay(200L)
-
-            headController.setGaze(normErrX = 0f, normErrY = 0f)
+            headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
 
             movementController.moveTowardAsync(distanceMeters = 1.5)
             delay(400L)
@@ -354,7 +357,16 @@ class VisualServoingController(
                     listener?.onObjectReached(target.label, target)
                     return@launch
                 }
+                // Rallentamento pre-arrivo
+                if (!slowApproachStarted && area >= targetArea * 0.60f && area < targetArea) {
+                    slowApproachStarted = true
+                    movementController.stopMovement()
+                    delay(1300L)
+                    movementController.moveTowardAsync(distanceMeters = 0.15)
+                    continue
+                }
 
+                // Stop finale
                 if (area >= targetArea) {
                     Log.i(TAG, "APPROACH DONE — area=%.4f >= target=%.4f".format(area, targetArea))
                     movementController.stopMovement()
@@ -373,8 +385,7 @@ class VisualServoingController(
                     headController.resetHead()
                     listener?.onObjectReached(target.label, target)
                     return@launch
-                }
-            }
+                }            }
             Log.i(TAG, "Tracking loop finished.")
         }
     }

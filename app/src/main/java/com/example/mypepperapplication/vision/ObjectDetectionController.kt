@@ -59,11 +59,8 @@ class ObjectDetectionController {
         fun onDetections(boxes: List<BoundingBox>, imageWidth: Int, imageHeight: Int)
     }
 
-    /*
-     * URL del server YOLOv8n
-     */
     @Volatile
-    var serverUrl: String = "http://10.186.13.27:8000"
+    var serverUrl: String = "http://10.186.13.27:8000" // URL del server YOLOv8n
     var jpegQuality: Int = 70
 
     // OkHttpClient configurato localmente, ma idealmente (appunto in questo

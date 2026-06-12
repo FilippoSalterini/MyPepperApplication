@@ -105,7 +105,15 @@ class PepperMovementController {
             when {
                 f.isSuccess   -> Log.d(TAG, "moveTowardAsync: destination reached")
                 f.isCancelled -> Log.d(TAG, "moveTowardAsync: cancelled (normal)")
-                f.hasError()  -> Log.w(TAG, "moveTowardAsync error: ${f.errorMessage}")
+                f.hasError() -> {
+                    val msg = f.errorMessage ?: ""
+                    if (msg.contains("No collision free path")) {
+                        Log.w(TAG, "moveTowardAsync: no path found (obstacle/angle) — continuing")
+                    } else {
+                        Log.w(TAG, "moveTowardAsync error: $msg")
+                    }
+                    if (currentGoToFuture == future) currentGoToFuture = null
+                }
             }
         }
     }

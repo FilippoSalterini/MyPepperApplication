@@ -44,14 +44,17 @@ class HeadMovementController {
         scanMode: Boolean = false
     ) = run {
         val lateral = clampLateral(-normErrX * 1.0f).toDouble() //prima era -normerrx * 1.3f
-
-        // Distanza avanti: più grande = testa più alta
+        /*
+         Distanza avanti: più grande = testa più alta
+         TEST:
+         1) 3.5 sguardo troppo basso
+         -> se no testa val adjustedErrY = normErrY - 0.15f  // sposta il punto di mira verso l'alto
+                        val forward = (2.2f - adjustedErrY * 1.8f).coerceIn(1.2f, 4.0f)
+         */
         val forward = if (scanMode) {
-            3.5
+            5.0
         } else {
-            (2.2f - normErrY * 1.8f)
-                .coerceIn(1.2f, 4.0f)
-                .toDouble()
+            (3.5f - normErrY * 1.8f).coerceIn(1.5f, 5.0f).toDouble()
         }
 
         TransformBuilder.create().from2DTransform(forward, lateral, 0.0)
