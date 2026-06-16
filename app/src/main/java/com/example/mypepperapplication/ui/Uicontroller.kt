@@ -27,12 +27,15 @@ class UiController(
     )
 
     var onFollowHuman: (() -> Unit)? = null
+    var onFindHuman: (() -> Unit)? = null
+
     var onStopFollowHuman: (() -> Unit)? = null
     var onTrackObject: ((label: String) -> Unit)? = null
     var onStopTracking: (() -> Unit)? = null
     var onSnapshot: (() -> Unit)? = null
     var onApproachHuman: (() -> Unit)? = null
     var onStopApproachHuman: (() -> Unit)? = null
+    var onStopFindHuman: (() -> Unit)? = null
     val selectedLabel: String
         get() = binding.spinnerLabel.selectedItem as? String ?: searchableLabels.first()
 
@@ -77,9 +80,16 @@ class UiController(
                 onApproachHuman?.invoke()
             }
         }
+    binding.btnFindHuman.setOnClickListener {
+        if (binding.btnFindHuman.tag == RobotMode.FIND_PERSON) {
+            onStopFindHuman?.invoke()
+        } else {
+            onFindHuman?.invoke()
+        }
+    }
     }
 
-    fun updateForMode(mode: RobotMode) {
+fun updateForMode(mode: RobotMode) {
         Log.d(TAG, "updateForMode: $mode")
         when (mode) {
             RobotMode.IDLE -> {
@@ -91,6 +101,8 @@ class UiController(
                 binding.spinnerLabel.isEnabled = true
                 binding.btnApproachHuman.text = "Approach Human"
                 binding.btnApproachHuman.tag  = RobotMode.IDLE
+                binding.btnFindHuman.text = "Find Human"
+                binding.btnFindHuman.tag  = RobotMode.IDLE
             }
             RobotMode.FOLLOW_HUMAN -> {
                 binding.btnFollowHuman.text = "Stop Following"
@@ -101,6 +113,8 @@ class UiController(
                 binding.spinnerLabel.isEnabled = false
                 binding.btnApproachHuman.text = "Approach Human"
                 binding.btnApproachHuman.tag  = RobotMode.IDLE
+                binding.btnFindHuman.text = "Find Human"
+                binding.btnFindHuman.tag  = RobotMode.IDLE
             }
             RobotMode.VISUAL_SERVOING -> {
                 binding.btnFollowHuman.text = "Follow Human"
@@ -111,6 +125,8 @@ class UiController(
                 binding.spinnerLabel.isEnabled = false
                 binding.btnApproachHuman.text = "Approach Human"
                 binding.btnApproachHuman.tag  = RobotMode.IDLE
+                binding.btnFindHuman.text = "Find Human"
+                binding.btnFindHuman.tag  = RobotMode.IDLE
             }
             RobotMode.APPROACH_HUMAN -> {
                 binding.btnFollowHuman.text = "Follow Human"
@@ -121,6 +137,20 @@ class UiController(
                 binding.btnTrack.tag        = RobotMode.IDLE
                 binding.tvStatus.text       = "Approaching Human…"
                 binding.spinnerLabel.isEnabled = false
+                binding.btnFindHuman.text = "Find Human"
+                binding.btnFindHuman.tag  = RobotMode.IDLE
+            }
+            RobotMode.FIND_PERSON -> {
+                binding.btnFollowHuman.text = "Follow Human"
+                binding.btnFollowHuman.tag  = RobotMode.IDLE
+                binding.btnApproachHuman.text = "Approach Human"
+                binding.btnApproachHuman.tag  = RobotMode.IDLE
+                binding.btnTrack.text       = "Track Object"
+                binding.btnTrack.tag        = RobotMode.IDLE
+                binding.tvStatus.text       = "Finding Human…"
+                binding.spinnerLabel.isEnabled = false
+                binding.btnFindHuman.text = "Stop Finding"
+                binding.btnFindHuman.tag  = RobotMode.FIND_PERSON
             }
         }
     }

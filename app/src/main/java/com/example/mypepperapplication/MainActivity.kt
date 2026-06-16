@@ -12,6 +12,7 @@ import com.example.mypepperapplication.core.RobotMode
 import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.ui.UiController
 import com.example.mypepperapplication.vision.BoundingBox
+import com.aldebaran.qi.sdk.`object`.human.Human
 
 // ================================================================
 // Main Activity
@@ -85,7 +86,11 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         }
         ui.onStopApproachHuman = { robotManager.stopApproachHuman() }
         ui.onStopFollowHuman = { robotManager.stopFollowHuman() }
-
+        ui.onFindHuman = {
+            ui { ui.showToast("Searching for person…") }
+            robotManager.startFindPerson()
+        }
+        ui.onStopFindHuman = { robotManager.stopFindPerson() }
         ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
         ui.onStopTracking = { robotManager.stopVisualServoing() }
 
@@ -110,6 +115,8 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         override fun onObjectReached(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
         override fun onObjectLost(labels: List<String>)     = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
         override fun onChargingFlapOpen()                   = ui { ui.showToast("Charging flap open — movement blocked") }
+        override fun onPersonFound(human: Human)            = ui { ui.showToast("Person found!") }
+        override fun onPersonNotFound()                     = ui { ui.showToast("No person found") }
     }
     private fun ui(block: () -> Unit) = runOnUiThread(block)
 }

@@ -9,6 +9,7 @@ import com.aldebaran.qi.sdk.`object`.holder.Holder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.example.mypepperapplication.controllers.FollowHuman
 import com.example.mypepperapplication.controllers.ApproachHuman
+import com.example.mypepperapplication.controllers.FindHuman
 import com.example.mypepperapplication.controllers.PepperMovementController
 import com.example.mypepperapplication.controllers.HeadMovementController
 import com.example.mypepperapplication.vision.BoundingBox
@@ -46,6 +47,8 @@ class RobotManager(
         fun onObjectReached(label: String, box: BoundingBox)
         fun onObjectLost(labels: List<String>)
         fun onChargingFlapOpen()
+        fun onPersonFound(human: Human)
+        fun onPersonNotFound()
     }
 
     companion object {
@@ -57,7 +60,22 @@ class RobotManager(
     private val cameraController    = PepperCameraController()
     private val headController      = HeadMovementController()
     val detectionController = ObjectDetectionController()
+    var lastKnownPerson: Human? = null
+        private set
+    private var qiContext: QiContext? = null
+    // locked human
+    private var lockedHuman: Human? = null
+    private var unlockTimerTask: TimerTask? = null
+    private val unlockTimer = Timer()
 
+    private var followHuman: FollowHuman? = null
+    private var approachHuman: ApproachHuman? = null
+    private var findHuman: FindHuman? = null
+    private val currentMode = AtomicReference(RobotMode.IDLE)
+
+    // disabilitare autonomous abilities
+    private var servoingHolder: Holder? = null
+    val mode: RobotMode get() = currentMode.get()
     private val servoingController = VisualServoingController(movementController, headController).also {
         it.listener = object : VisualServoingController.VisualServoingListener {
             override fun onObjectReached(label: String, box: BoundingBox) {
@@ -83,19 +101,6 @@ class RobotManager(
             }
         }
     }
-    // locked human
-    private var lockedHuman: Human? = null
-    private var unlockTimerTask: TimerTask? = null
-    private val unlockTimer = Timer()
-
-    private var followHuman: FollowHuman? = null
-    private var approachHuman: ApproachHuman? = null
-    private val currentMode = AtomicReference(RobotMode.IDLE)
-    private var qiContext: QiContext? = null
-
-    // disabilitare autonomous abilities
-    private var servoingHolder: Holder? = null
-    val mode: RobotMode get() = currentMode.get()
     fun onRobotReady(ctx: QiContext) {
         qiContext = ctx
         movementController.onRobotReady(ctx)
@@ -336,6 +341,10 @@ class RobotManager(
                         cleanStopServoing()
                         withContext(Dispatchers.Main) { listener?.onServoingStopped() }
                     }
+                    RobotMode.FIND_PERSON -> {
+                        findHuman?.stop()
+                        findHuman = null
+                    }
                     RobotMode.IDLE -> { }
                 }
                 setMode(RobotMode.IDLE)
@@ -360,6 +369,11 @@ class RobotManager(
             RobotMode.VISUAL_SERVOING -> {
                 cleanStopServoing()
                 withContext(Dispatchers.Main) { listener?.onServoingStopped() }
+            }
+
+            RobotMode.FIND_PERSON -> {
+                findHuman?.stop()
+                findHuman = null
             }
             RobotMode.IDLE -> { }
         }
@@ -438,6 +452,57 @@ class RobotManager(
                     setMode(RobotMode.IDLE)
                     Log.i(TAG, "ApproachHuman stopped safely")
                 }
+            }
+        }
+    }
+
+    fun startFindPerson() {
+        val ctx = qiContext ?: run { Log.e(TAG, "QiContext null"); return }
+
+        managerScope.launch {
+            modeMutex.withLock {
+                if (!switchModeAsync(RobotMode.FIND_PERSON)) return@withLock
+
+                findHuman = FindHuman(
+                    qiContext           = ctx,
+                    movementController  = movementController,
+                    headController      = headController
+                ).also {
+                    it.listener = object : FindHuman.FindPersonListener {
+                        override fun onPersonFound(human: Human) {
+                            managerScope.launch {
+                                modeMutex.withLock {
+                                    findHuman = null
+                                    lastKnownPerson = human   // ← state tracking
+                                    setMode(RobotMode.IDLE)
+                                    withContext(Dispatchers.Main) { listener?.onPersonFound(human) }
+                                }
+                            }
+                        }
+                        override fun onPersonNotFound() {
+                            managerScope.launch {
+                                modeMutex.withLock {
+                                    findHuman = null
+                                    setMode(RobotMode.IDLE)
+                                    withContext(Dispatchers.Main) { listener?.onPersonNotFound() }
+                                }
+                            }
+                        }
+                    }
+                    it.start()
+                }
+                Log.i(TAG, "FindPerson started")
+            }
+        }
+    }
+
+    fun stopFindPerson() {
+        if (currentMode.get() != RobotMode.FIND_PERSON) return
+        managerScope.launch {
+            modeMutex.withLock {
+                findHuman?.stop()
+                findHuman = null
+                setMode(RobotMode.IDLE)
             }
         }
     }

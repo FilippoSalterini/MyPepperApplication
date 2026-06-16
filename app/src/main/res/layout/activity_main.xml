@@ -136,6 +136,12 @@
                 android:layout_marginEnd="8dp"
                 android:text="@string/snapshot"
                 android:textColor="#FFFFFF" />
+            <Button
+                android:id="@+id/btnFindHuman"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Find Human" />
 
             <Button
                 android:id="@+id/btnTrack"
