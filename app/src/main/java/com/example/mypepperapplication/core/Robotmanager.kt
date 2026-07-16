@@ -2,6 +2,7 @@ package com.example.mypepperapplication.core
 
 import android.graphics.Bitmap
 import android.util.Log
+import android.content.Context
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.`object`.human.Human
 import com.aldebaran.qi.sdk.`object`.holder.AutonomousAbilitiesType
@@ -16,6 +17,10 @@ import com.example.mypepperapplication.vision.BoundingBox
 import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
+import com.example.mypepperapplication.conversation.ConversationController
+import com.example.mypepperapplication.conversation.CMD_FOLLOW
+import com.example.mypepperapplication.conversation.CMD_STOP
+import com.example.mypepperapplication.conversation.CMD_APPROACH
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
 import kotlinx.coroutines.*
@@ -34,7 +39,11 @@ import java.util.TimerTask
  *   - processSnapshot
  */
 class RobotManager(
-    private val listener: RobotManagerListener? = null
+    private val listener: RobotManagerListener? = null,
+    private val context: Context,
+    private val azureKey: String,
+    private val serverIp: String
+
 ) {
     interface RobotManagerListener {
         fun onModeChanged(mode: RobotMode)
@@ -71,6 +80,8 @@ class RobotManager(
     private var followHuman: FollowHuman? = null
     private var approachHuman: ApproachHuman? = null
     private var findHuman: FindHuman? = null
+    private var conversationController: ConversationController? = null
+    private var conversationJob: Job? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
 
     // disabilitare autonomous abilities
@@ -108,9 +119,16 @@ class RobotManager(
         headController.onRobotReady(ctx)
         servoingController.onRobotReady()
         Log.i(TAG, "Robot ready")
+        startConversationService(ctx)
     }
 
     fun onRobotLost() {
+        unlockTimerTask?.cancel()
+        unlockTimerTask = null
+        conversationController?.stop()
+        conversationController = null
+        conversationJob?.cancel()
+        conversationJob = null
         stopAll()
         movementController.onRobotLost()
         cameraController.onRobotLost()
@@ -332,6 +350,9 @@ class RobotManager(
                     RobotMode.FOLLOW_HUMAN -> {
                         followHuman?.stop()
                         followHuman = null
+                        lockedHuman = null
+                        unlockTimerTask?.cancel()
+                        unlockTimerTask = null
                     }
                     RobotMode.APPROACH_HUMAN -> {
                         approachHuman?.stop()
@@ -506,4 +527,74 @@ class RobotManager(
             }
         }
     }
+    private fun startConversationService(ctx: QiContext) {
+        conversationController?.stop()
+        conversationJob?.cancel()
+
+        val controller = ConversationController(
+            context   = context,
+            qiContext = ctx,
+            azureKey  = azureKey,
+            serverIp  = serverIp
+        ).also {
+            it.onListening   = { Log.d(TAG, "Conversation: listening") }
+            it.onUserSpeech  = { text -> Log.i(TAG, "User: $text") }
+            it.onRobotSpeech = { text -> Log.i(TAG, "Pepper: $text") }
+            it.onMotionCommand = { cmd ->
+                when (cmd) {
+                    CMD_FOLLOW   -> startFollowHumanAutoDetect()
+                    CMD_STOP     -> managerScope.launch {
+                        movementController.stopMovement()
+                    }
+                    CMD_APPROACH -> startApproachHuman()
+                }
+            }
+        }
+        conversationController = controller
+
+        conversationJob = managerScope.launch {
+            try {
+                controller.startConversationLoop()
+                delay(2000)
+                val freshCtx = qiContext ?: return@launch   // esce se robot è perso
+                if (isActive) startConversationService(freshCtx)
+            } catch (_: CancellationException) {
+                Log.d(TAG, "Conversation job cancelled")
+            }
+        }
+
+        Log.i(TAG, "Conversation service started")
+    }
+
+/*
+    suspend fun sayMessage(text: String, lang: String) {
+        if (qiContext != null) {
+            try {
+                withContext(Dispatchers.IO) {
+                    val locale = if (lang == "en-US") {
+                        Locale(Language.ENGLISH, Region.UNITED_STATES)
+                    } else {
+                        Locale(Language.ITALIAN, Region.ITALY)
+                    }
+
+                    // Create a phrase.
+                    val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
+
+                    val say = SayBuilder.with(qiContext)
+                        .withPhrase(phrase)
+                        .withLocale(locale)
+                        .build()
+                    Log.d(TAG, "Before say.run(): $text")
+                    say.run()
+                    Log.d(TAG, "After say.run(): $text")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during Say: ${e.message}")
+            }
+        } else {
+            Log.e(TAG, "QiContext is not initialized. Cannot perform Say.")
+        }
+    }
+*/
+
 }

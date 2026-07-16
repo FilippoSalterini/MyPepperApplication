@@ -1,8 +1,12 @@
 package com.example.mypepperapplication
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.QiSDK
 import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
@@ -17,19 +21,20 @@ import com.aldebaran.qi.sdk.`object`.human.Human
 // ================================================================
 // Main Activity
 // ================================================================
+
 /*
  * Entry point Android.
- * Responsabilità (e SOLO queste):
+ * Responsabilità:
  *   1. Lifecycle Android + QiSDK
  *   2. Creazione di UiController e RobotManager
  *   3. Wiring UI → RobotManager tramite [bindUiToRobot]
- *
- * Tutto il resto è delegato: logica robot → RobotManager, logica UI → UiController.
+ *   Resto : logica robot → RobotManager, logica UI → UiController.
  */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val REQUEST_AUDIO = 100
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -44,6 +49,15 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         QiSDK.register(this, this)
 
         ui = UiController(binding, this)
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                REQUEST_AUDIO
+            )
+        }
     }
 
     override fun onDestroy() {
@@ -55,9 +69,14 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     override fun onRobotFocusGained(ctx: QiContext) {
         Log.d(TAG, "onRobotFocusGained")
 
-        robotManager = RobotManager(listener = buildRobotListener()).apply {
+        robotManager = RobotManager(
+            listener  = buildRobotListener(),
+            context   = this,
+            azureKey  = BuildConfig.AZURE_SPEECH_KEY,
+            serverIp  = AppConfig.SERVER_IP
+        ).apply {
             onRobotReady(ctx)
-            detectionController.serverUrl       = AppConfig.DETECTION_SERVER_URL
+            detectionController.serverUrl = AppConfig.DETECTION_SERVER_URL
         }
 
         bindUiToRobot()
@@ -104,7 +123,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         }
     }
     private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
-
         override fun onModeChanged(mode: RobotMode)         = ui { ui.updateForMode(mode) }
         override fun onFollowingHuman()                     = ui { ui.showToast("Following the human…") }
         override fun onCloseEnoughToHuman()                 = ui { ui.showToast("I'm close! I'll stop") }

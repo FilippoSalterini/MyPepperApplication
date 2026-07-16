@@ -12,6 +12,7 @@
     <uses-permission android:name="com.softbankrobotics.permission.MOVE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
         android:usesCleartextTraffic="true"
         android:allowBackup="true"

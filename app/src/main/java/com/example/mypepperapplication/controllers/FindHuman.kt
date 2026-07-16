@@ -19,8 +19,8 @@ class FindHuman(
     companion object {
         private const val TAG = "FindPersonController"
         private const val ROTATION_STEP_DEG = 45.0
-        private const val ROTATION_STEPS    = 8        // 8 × 45° = 360°
-        private const val STEP_DELAY_MS     = 800L     // attesa dopo ogni rotazione
+        private const val ROTATION_STEPS    = 8        // 8 × 45grad = 360grad
+        private const val STEP_DELAY_MS     = 800L     // attesa dopo ogni rotazione CHECK
     }
 
     var listener: FindPersonListener? = null

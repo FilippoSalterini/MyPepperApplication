@@ -1,0 +1,438 @@
+package com.example.mypepperapplication.conversation
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.media.audiofx.NoiseSuppressor
+import android.util.Log
+import androidx.core.content.ContextCompat
+import com.aldebaran.qi.sdk.QiContext
+import com.aldebaran.qi.sdk.`object`.conversation.Phrase
+import com.aldebaran.qi.sdk.`object`.locale.Language
+import com.aldebaran.qi.sdk.`object`.locale.Locale
+import com.aldebaran.qi.sdk.`object`.locale.Region
+import com.aldebaran.qi.sdk.builder.SayBuilder
+import com.microsoft.cognitiveservices.speech.*
+import com.microsoft.cognitiveservices.speech.audio.*
+import kotlinx.coroutines.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+private const val TAG = "ConversationController"
+
+private const val SAMPLE_RATE       = 16000
+private const val AUDIO_SOURCE      = MediaRecorder.AudioSource.MIC
+private const val CHANNEL_CONFIG    = AudioFormat.CHANNEL_IN_MONO
+private const val AUDIO_FORMAT      = AudioFormat.ENCODING_PCM_16BIT
+private const val THRESHOLD_ADJUSTMENT = 2000
+private const val SHORT_SILENCE_MS  = 400L
+private const val LONG_SILENCE_MS   = 2500L
+private const val INITIAL_TIMEOUT_MS = 60_000L
+private const val AZURE_REGION      = "westeurope"
+
+// Motion command labels — used by RobotManager to dispatch actions
+const val CMD_FOLLOW  = "follow"
+const val CMD_STOP    = "stop"
+const val CMD_APPROACH = "approach"
+
+class ConversationController(
+    private val context: Context,
+    private val qiContext: QiContext,
+    private val azureKey: String,
+    private val serverIp: String,
+    private val serverPort: Int = 8000,
+    private val language: String = "en-US",
+    private val voiceSpeed: Int = 100,
+    private val voicePitch: Int = 100
+) {
+    private val dialogueState     = DialogueState()
+    private val sentenceGenerator = SentenceGenerator()
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private var speechDetectionThreshold = 2000
+
+    @Volatile var isRunning = false
+        private set
+    @Volatile private var isSpeaking = false
+    private val bufferSize = 2 * AudioRecord.getMinBufferSize(
+        SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
+    )
+
+    // ── UI callbacks ──────────────────────────────────────────────────────
+    var onListening:    (() -> Unit)?       = null
+    var onThinking:     (() -> Unit)?       = null
+    var onUserSpeech:   ((String) -> Unit)? = null
+    var onRobotSpeech:  ((String) -> Unit)? = null
+
+    // ── Motion callback — the ONLY bridge to RobotManager ────────────────
+    // RobotManager sets this to handle CMD_FOLLOW / CMD_STOP / CMD_APPROACH
+    var onMotionCommand: ((String) -> Unit)? = null
+
+    // ── Motion keyword table (English) ────────────────────────────────────
+    private val motionCommands: Map<String, List<String>> = mapOf(
+        CMD_FOLLOW   to listOf("follow me", "come with me", "come along", "follow"),
+        CMD_STOP     to listOf("stop", "wait", "stay", "hold on", "stand still"),
+        CMD_APPROACH to listOf("come here", "come closer", "get closer", "approach me")
+    )
+
+    // Confirmation phrases Pepper says before executing the command
+    private val motionReplies: Map<String, String> = mapOf(
+        CMD_FOLLOW   to "Ok, I will follow you!",
+        CMD_STOP     to "Ok, stopping.",
+        CMD_APPROACH to "Sure, coming closer!"
+    )
+
+    // ── Exit keywords ─────────────────────────────────────────────────────
+    private val exitPhrases = listOf("goodbye", "bye", "see you", "that's all")
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Main loop
+    // ─────────────────────────────────────────────────────────────────────
+
+    suspend fun startConversationLoop() {
+        isRunning = true
+        Log.i(TAG, "Starting conversation loop")
+
+        withContext(Dispatchers.IO) { calibrateThreshold() }
+
+        val welcome = sentenceGenerator.getPredefinedSentence(language, "welcome_back")
+        onRobotSpeech?.invoke(welcome)
+        sayMessage(welcome)
+
+        while (currentCoroutineContext().isActive && isRunning) {
+
+            onListening?.invoke()
+
+            val userSentence = listenAndRecognize()
+            if (userSentence.isBlank()) continue
+
+            Log.i(TAG, "User said: [$userSentence]")
+            onUserSpeech?.invoke(userSentence)
+
+            // 1. Exit check
+            if (exitPhrases.any { userSentence.contains(it, ignoreCase = true) }) {
+                val goodbye = sentenceGenerator.getPredefinedSentence(language, "goodbye")
+                onRobotSpeech?.invoke(goodbye)
+                sayMessage(goodbye)
+                isRunning = false
+                break
+            }
+
+            // 2. Motion command check — intercepts BEFORE hitting the server
+            val matchedCmd = matchMotionCommand(userSentence)
+            if (matchedCmd != null) {
+                val reply = motionReplies[matchedCmd] ?: "Ok!"
+                onRobotSpeech?.invoke(reply)
+                sayMessage(reply)
+                onMotionCommand?.invoke(matchedCmd)   // RobotManager handles the rest
+                continue                              // skip server call entirely
+            }
+
+            // 3. Normal conversational turn → server
+            // Snapshot history BEFORE adding user message, so server receives
+            // only the prior context (not the message it's supposed to reply to)
+            val historySnapshot = dialogueState.conversationHistory.toList()
+            dialogueState.updateConversation("user", userSentence)
+
+            onThinking?.invoke()
+            val reply = chatRequest(userSentence, historySnapshot)
+            Log.i(TAG, "Robot reply: [$reply]")
+
+            dialogueState.updateConversation("assistant", reply)
+            onRobotSpeech?.invoke(reply)
+            sayMessage(reply)
+        }
+
+        Log.i(TAG, "Conversation loop ended")
+        isRunning = false
+    }
+
+    fun stop() {
+        isRunning = false
+    }
+
+    fun resetHistory() {
+        dialogueState.resetConversation()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Motion command matching
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun matchMotionCommand(sentence: String): String? {
+        val lower = sentence.lowercase()
+        for ((cmd, keywords) in motionCommands) {
+            if (keywords.any { lower.contains(it) }) return cmd
+        }
+        return null
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Threshold calibration
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun calibrateThreshold() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) return
+
+        val audioRecord = AudioRecord(
+            AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize
+        )
+        val buffer = ShortArray(bufferSize)
+        try {
+            audioRecord.startRecording()
+            audioRecord.read(buffer, 0, bufferSize)
+            val bg = buffer.maxOrNull()?.toInt() ?: 0
+            speechDetectionThreshold = bg + THRESHOLD_ADJUSTMENT
+            Log.i(TAG, "Threshold calibrated: $speechDetectionThreshold (bg=$bg)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Calibration error: ${e.message}")
+        } finally {
+            audioRecord.stop()
+            audioRecord.release()
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Recording + Azure recognition
+    // ─────────────────────────────────────────────────────────────────────
+
+    private suspend fun listenAndRecognize(): String = withContext(Dispatchers.IO) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "RECORD_AUDIO permission missing")
+            return@withContext ""
+        }
+
+        val audioRecord = AudioRecord(
+            AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize
+        )
+        val noiseSuppressor = if (NoiseSuppressor.isAvailable())
+            NoiseSuppressor.create(audioRecord.audioSessionId) else null
+
+        val audioBuffer  = ShortArray(bufferSize)
+        val byteStream   = ByteArrayOutputStream()
+        var lastDetection: Long? = null
+        val startTime    = System.currentTimeMillis()
+        val results      = ConcurrentHashMap<Int, String>()
+        var chunkIndex   = 0
+
+        try {
+            audioRecord.startRecording()
+
+            // coroutineScope inherits cancellation from the parent — no leak
+            coroutineScope {
+                while (true) {
+                    val now = System.currentTimeMillis()
+                    if (now - startTime > INITIAL_TIMEOUT_MS) break
+
+                    val ret = audioRecord.read(audioBuffer, 0, audioBuffer.size)
+                    if (ret < 0) { Log.e(TAG, "AudioRecord read error $ret"); break }
+
+                    if (isSpeaking) {
+                        byteStream.reset()
+                        lastDetection = null
+                        continue
+                    }
+
+                    val maxAmp = audioBuffer.maxOrNull()?.toInt() ?: 0
+                    if (maxAmp > speechDetectionThreshold) {
+                        lastDetection = now
+                        byteStream.write(shortsToBytes(audioBuffer))
+                    }
+
+                    lastDetection?.let { det ->
+                        if (now - det > SHORT_SILENCE_MS && byteStream.size() > 0) {
+                            val audioBytes = byteStream.toByteArray()
+                            byteStream.reset()
+                            val index = chunkIndex++
+                            launch(Dispatchers.Default) {
+                                val text = recognizeChunk(audioBytes)
+                                if (text.isNotEmpty()) results[index] = text
+                            }
+                        }
+                        if (now - det > LONG_SILENCE_MS) {
+                            Log.d(TAG, "Long silence — sentence complete")
+                            return@coroutineScope
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Recording error: ${e.message}")
+        } finally {
+            audioRecord.stop()
+            audioRecord.release()
+            noiseSuppressor?.release()
+        }
+
+        results.toSortedMap().values.joinToString(" ").trim()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Single chunk recognition via Azure
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun recognizeChunk(audioBytes: ByteArray): String {
+        if (audioBytes.isEmpty()) return ""
+
+        val tempFile = File.createTempFile("chunk", ".wav", context.cacheDir)
+        writeWavFile(audioBytes, tempFile)
+
+        val speechConfig = SpeechConfig.fromSubscription(azureKey, AZURE_REGION).apply {
+            speechRecognitionLanguage = "en-US"
+            setProperty("OPENSSL_DISABLE_CRL_CHECK", "true")
+        }
+        val audioConfig = AudioConfig.fromWavFileInput(tempFile.absolutePath)
+        val recognizer  = SpeechRecognizer(speechConfig, audioConfig)
+
+        var text = ""
+        try {
+            val result = recognizer.recognizeOnceAsync().get()
+            when (result.reason) {
+                ResultReason.RecognizedSpeech -> {
+                    text = result.text ?: ""
+                    Log.d(TAG, "Chunk recognized: $text")
+                }
+                ResultReason.NoMatch  -> Log.w(TAG, "No match")
+                ResultReason.Canceled -> {
+                    val d = CancellationDetails.fromResult(result)
+                    Log.e(TAG, "Canceled: ${d.reason} / ${d.errorDetails}")
+                }
+                else -> {}
+            }
+            result.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "recognizeChunk error: ${e.message}")
+        } finally {
+            Thread {
+                recognizer.close(); speechConfig.close()
+                audioConfig.close(); tempFile.delete()
+            }.start()
+        }
+        return text
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // LLM request
+    // ─────────────────────────────────────────────────────────────────────
+
+    private suspend fun chatRequest(
+        userMessage: String,
+        history: List<Map<String, String>>
+    ): String = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("message", userMessage)
+                put("history", JSONArray().apply {
+                    history.forEach { put(JSONObject(it as Map<*, *>)) }
+                })
+            }.toString()
+
+            val response = httpClient.newCall(
+                Request.Builder()
+                    .url("http://$serverIp:$serverPort/chat")
+                    .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
+                    .build()
+            ).execute()
+
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Chat request HTTP ${response.code}")
+                return@withContext sentenceGenerator.getPredefinedSentence(language, "server_unavailable")
+            }
+
+            JSONObject(response.body!!.string()).getString("reply")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "chatRequest error: ${e.message}")
+            sentenceGenerator.getPredefinedSentence(language, "server_connection_error")
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TTS via QiSDK
+    // ─────────────────────────────────────────────────────────────────────
+
+    private suspend fun sayMessage(text: String) = withContext(Dispatchers.IO) {
+        try {
+            isSpeaking = true
+            val locale = if (language == "en-US")
+                Locale(Language.ENGLISH, Region.UNITED_STATES)
+            else
+                Locale(Language.ITALIAN, Region.ITALY)
+
+            val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
+            SayBuilder.with(qiContext)
+                .withPhrase(phrase)
+                .withLocale(locale)
+                .build()
+                .run()
+        } catch (e: Exception) {
+            Log.e(TAG, "sayMessage error: ${e.message}")
+        } finally {
+            isSpeaking = false
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Audio utilities
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun shortsToBytes(sData: ShortArray): ByteArray {
+        val bytes = ByteArray(sData.size * 2)
+        for (i in sData.indices) {
+            bytes[i * 2]     = (sData[i].toInt() and 0x00FF).toByte()
+            bytes[i * 2 + 1] = (sData[i].toInt() shr 8).toByte()
+        }
+        return bytes
+    }
+
+    private fun writeWavFile(audioBytes: ByteArray, file: File) {
+        try {
+            FileOutputStream(file).use { fos ->
+                val byteRate = 16 * SAMPLE_RATE / 8
+                fos.write("RIFF".toByteArray(Charsets.US_ASCII))
+                fos.write(intToBytes(audioBytes.size + 36))
+                fos.write("WAVE".toByteArray(Charsets.US_ASCII))
+                fos.write("fmt ".toByteArray(Charsets.US_ASCII))
+                fos.write(intToBytes(16))
+                fos.write(shortToBytes(1))
+                fos.write(shortToBytes(1))
+                fos.write(intToBytes(SAMPLE_RATE))
+                fos.write(intToBytes(byteRate))
+                fos.write(shortToBytes(2))
+                fos.write(shortToBytes(16))
+                fos.write("data".toByteArray(Charsets.US_ASCII))
+                fos.write(intToBytes(audioBytes.size))
+                fos.write(audioBytes)
+            }
+        } catch (e: IOException) {
+            Log.e(TAG, "writeWavFile error: ${e.message}")
+        }
+    }
+
+    private fun intToBytes(v: Int) = byteArrayOf(
+        v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte()
+    )
+
+    private fun shortToBytes(v: Int) = byteArrayOf(
+        v.toByte(), (v shr 8).toByte()
+    )
+}
