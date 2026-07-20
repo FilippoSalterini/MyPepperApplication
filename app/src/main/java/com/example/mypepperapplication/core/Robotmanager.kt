@@ -1,6 +1,5 @@
 package com.example.mypepperapplication.core
 
-import android.graphics.Bitmap
 import android.util.Log
 import android.content.Context
 import com.aldebaran.qi.sdk.QiContext
@@ -83,6 +82,8 @@ class RobotManager(
     private var conversationController: ConversationController? = null
     private var conversationJob: Job? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
+    var onUserSpeechUi:  ((String) -> Unit)? = null
+    var onRobotSpeechUi: ((String) -> Unit)? = null
 
     // disabilitare autonomous abilities
     private var servoingHolder: Holder? = null
@@ -165,8 +166,8 @@ class RobotManager(
             servoingHolder = null
         }
     }
-    // FLUSSO DI CLEANUP ATOMICO CON TIMEOUT
     /**
+     * FLUSSO DI CLEANUP ATOMICO CON TIMEOUT
      * Esegue l'arresto sequenziale e sicuro del ciclo di servoing.
      * Deve essere invocata sempre all'interno del blocco modeMutex.withLock.
      */
@@ -176,7 +177,6 @@ class RobotManager(
         withTimeoutOrNull(1500L) {
             servoingController.stopTracking()
         }
-        // Fix: Fermiamo la base prima di restituire il controllo al sistema nativo
         movementController.stopMovement()
         // Finestra di tolleranza per far respirare il middleware di Pepper
         delay(250L)
@@ -327,18 +327,6 @@ class RobotManager(
                     cleanStopServoing()
                     withContext(Dispatchers.Main) { listener?.onServoingStopped() }
                 }
-            }
-        }
-    }
-
-    fun processSnapshot(
-        onBitmap: (Bitmap) -> Unit,
-        onDetection: (boxes: List<BoundingBox>, w: Int, h: Int) -> Unit
-    ) {
-        cameraController.takeSinglePicture { bitmap, _ ->
-            onBitmap(bitmap)
-            detectionController.detect(bitmap) { boxes, w, h ->
-                onDetection(boxes, w, h)
             }
         }
     }
@@ -541,13 +529,26 @@ class RobotManager(
             it.onUserSpeech  = { text -> Log.i(TAG, "User: $text") }
             it.onRobotSpeech = { text -> Log.i(TAG, "Pepper: $text") }
             it.onMotionCommand = { cmd ->
-                when (cmd) {
-                    CMD_FOLLOW   -> startFollowHumanAutoDetect()
-                    CMD_STOP     -> managerScope.launch {
+                when {
+                    cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
+                    cmd == CMD_STOP     -> managerScope.launch {
                         movementController.stopMovement()
                     }
-                    CMD_APPROACH -> startApproachHuman()
+                    cmd == CMD_APPROACH -> startApproachHuman()
+                    cmd.startsWith("track:") -> {
+                        val label = cmd.removePrefix("track:")
+                        startVisualServoing(label)
+                    }
                 }
+            }
+            it.onUserSpeech  = { text ->
+                Log.i(TAG, "User: $text")
+                // callback verso MainActivity per aggiornare UI
+                onUserSpeechUi?.invoke(text)
+            }
+            it.onRobotSpeech = { text ->
+                Log.i(TAG, "Pepper: $text")
+                onRobotSpeechUi?.invoke(text)
             }
         }
         conversationController = controller
@@ -565,36 +566,4 @@ class RobotManager(
 
         Log.i(TAG, "Conversation service started")
     }
-
-/*
-    suspend fun sayMessage(text: String, lang: String) {
-        if (qiContext != null) {
-            try {
-                withContext(Dispatchers.IO) {
-                    val locale = if (lang == "en-US") {
-                        Locale(Language.ENGLISH, Region.UNITED_STATES)
-                    } else {
-                        Locale(Language.ITALIAN, Region.ITALY)
-                    }
-
-                    // Create a phrase.
-                    val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
-
-                    val say = SayBuilder.with(qiContext)
-                        .withPhrase(phrase)
-                        .withLocale(locale)
-                        .build()
-                    Log.d(TAG, "Before say.run(): $text")
-                    say.run()
-                    Log.d(TAG, "After say.run(): $text")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error during Say: ${e.message}")
-            }
-        } else {
-            Log.e(TAG, "QiContext is not initialized. Cannot perform Say.")
-        }
-    }
-*/
-
 }

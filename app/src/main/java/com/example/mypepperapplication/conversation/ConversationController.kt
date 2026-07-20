@@ -33,13 +33,13 @@ import java.util.concurrent.TimeUnit
 
 private const val TAG = "ConversationController"
 
-private const val SAMPLE_RATE       = 16000
+private const val SAMPLE_RATE       = 16000 // indica microfono registra a 16kHz
 private const val AUDIO_SOURCE      = MediaRecorder.AudioSource.MIC
-private const val CHANNEL_CONFIG    = AudioFormat.CHANNEL_IN_MONO
-private const val AUDIO_FORMAT      = AudioFormat.ENCODING_PCM_16BIT
+private const val CHANNEL_CONFIG    = AudioFormat.CHANNEL_IN_MONO // un solo canale audio
+private const val AUDIO_FORMAT      = AudioFormat.ENCODING_PCM_16BIT //campioni a 16bit
 private const val THRESHOLD_ADJUSTMENT = 2000
-private const val SHORT_SILENCE_MS  = 400L
-private const val LONG_SILENCE_MS   = 2500L
+private const val SHORT_SILENCE_MS  = 400L //dopo 400ms di silence, inizia la richiesta
+private const val LONG_SILENCE_MS   = 2500L //dopo 2.5s considera terminata tutta la frase
 private const val INITIAL_TIMEOUT_MS = 60_000L
 private const val AZURE_REGION      = "westeurope"
 
@@ -58,10 +58,10 @@ class ConversationController(
     private val voiceSpeed: Int = 100,
     private val voicePitch: Int = 100
 ) {
-    private val dialogueState     = DialogueState()
+    private val dialogueState     = DialogueState() //cronologia conversazione
     private val sentenceGenerator = SentenceGenerator()
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = OkHttpClient.Builder() //comunicazione con server python
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
@@ -101,6 +101,36 @@ class ConversationController(
 
     // ── Exit keywords ─────────────────────────────────────────────────────
     private val exitPhrases = listOf("goodbye", "bye", "see you", "that's all")
+/*
+- isTrackIntent() serve per controllare se la frase contiene le keyword di ricerca
+- extractLabel() invece chiama /extract_label e ottiene il label YOLO della frase
+ */
+    private val trackTriggers = listOf(
+        "find", "look for", "where is", "where are",
+        "search", "track", "locate", "get me"
+    )
+
+    private fun isTrackIntent(sentence: String): Boolean =
+        trackTriggers.any { sentence.lowercase().contains(it) }
+
+    private suspend fun extractLabel(sentence: String): String = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("message", sentence)
+                put("history", JSONArray())
+            }.toString()
+            val response = httpClient.newCall(
+                Request.Builder()
+                    .url("http://$serverIp:$serverPort/extract_label")
+                    .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
+                    .build()
+            ).execute()
+            JSONObject(response.body!!.string()).getString("label")
+        } catch (e: Exception) {
+            Log.e(TAG, "extractLabel error: ${e.message}")
+            "none"
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // Main loop
@@ -109,7 +139,7 @@ class ConversationController(
     suspend fun startConversationLoop() {
         isRunning = true
         Log.i(TAG, "Starting conversation loop")
-
+    // calibrate_threshold serve per misurare il rumore ambientale
         withContext(Dispatchers.IO) { calibrateThreshold() }
 
         val welcome = sentenceGenerator.getPredefinedSentence(language, "welcome_back")
@@ -142,10 +172,20 @@ class ConversationController(
                 onRobotSpeech?.invoke(reply)
                 sayMessage(reply)
                 onMotionCommand?.invoke(matchedCmd)   // RobotManager handles the rest
-                continue                              // skip server call entirely
+                continue
             }
-
-            // 3. Normal conversational turn → server
+            // 3. Track object intent
+            if (isTrackIntent(userSentence)) {
+                val label = extractLabel(userSentence)
+                if (label != "none") {
+                    val reply = "Ok, I'll look for the $label!"
+                    onRobotSpeech?.invoke(reply)
+                    sayMessage(reply)
+                    onMotionCommand?.invoke("track:$label")
+                    continue
+                }
+            }
+            // 4. Normal conversational turn → server
             // Snapshot history BEFORE adding user message, so server receives
             // only the prior context (not the message it's supposed to reply to)
             val historySnapshot = dialogueState.conversationHistory.toList()
@@ -213,7 +253,19 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Recording + Azure recognition
     // ─────────────────────────────────────────────────────────────────────
-
+    /*
+    Questa funziona svolge contemporanemante: registrazione audio, rilevazione quando
+    si sta parlando, l audio viene diviso in blocchi e ogni blocco viene trasmesso ad azure
+    RecognizeChunk restituisce il testo riconosciuto -> il codcie salva tmp il blocco audio
+    in un file WAV (writewavfile()) siccome speechrecognizer viene configurato per leggere
+    da un file WAV e poi crea :
+    SpeechConfig
+    AudioConfig
+    SpeechRecognizer
+    ed invoca recognizeOnceAsync() -> se il ricosnoscimento funziona recognizedSpeech restituisce
+    il testo, se invece non trova corrispondenze o l operazione viene annullata, registra un messaggio
+    di LOG -> alla fine chiude tutte le risorse e cancella il file tmp.
+     */
     private suspend fun listenAndRecognize(): String = withContext(Dispatchers.IO) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
@@ -333,7 +385,13 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // LLM request
     // ─────────────────────────────────────────────────────────────────────
-
+    /*
+    funzione chatRequest che serve per comnicare con il server LLM, crea un file
+    JSON contenente il messaggio corrente e lo storico della cvorsazione
+    --> invia una richuiesta HTTP POST all endpoint chat del server python, se server
+    risponde correttamente allora HTTP 200 ed estrae il campo reply dal risposta json, SE server
+    non dovesse essere raggiungibile o resisituisce un errore ippure usa una frase predefinita di default
+     */
     private suspend fun chatRequest(
         userMessage: String,
         history: List<Map<String, String>>

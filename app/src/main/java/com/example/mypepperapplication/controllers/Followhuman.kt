@@ -28,9 +28,8 @@ import kotlin.math.hypot
 class FollowHuman(
     private val qiContext: QiContext,
     private val humanToFollow: Human,
-    private val followHumanListener: FollowHumanListener? = null,
-    private val closeEnoughDistance: Double = 1.0,
-    private val tooFarDistance: Double = 1.7 ) {
+    private val followHumanListener: FollowHumanListener? = null
+) {
 
     interface FollowHumanListener {
         fun onFollowingHuman()

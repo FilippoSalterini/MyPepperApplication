@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         ).apply {
             onRobotReady(ctx)
             detectionController.serverUrl = AppConfig.DETECTION_SERVER_URL
+            onUserSpeechUi  = { text -> ui { ui.addUserMessage(text) } }
+            onRobotSpeechUi = { text -> ui { ui.addRobotMessage(text) } }
+
         }
 
         bindUiToRobot()
@@ -113,14 +116,6 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
         ui.onStopTracking = { robotManager.stopVisualServoing() }
 
-
-        // [5] Snapshot: nessun callback annidato in Activity.
-        ui.onSnapshot = {
-            robotManager.processSnapshot(
-                onBitmap    = { bitmap -> ui { ui.showBitmap(bitmap) } },
-                onDetection = { boxes, w, h -> ui { ui.updateOverlay(boxes, w, h) } }
-            )
-        }
     }
     private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
         override fun onModeChanged(mode: RobotMode)         = ui { ui.updateForMode(mode) }
