@@ -71,6 +71,7 @@ class ConversationController(
     @Volatile var isRunning = false
         private set
     @Volatile private var isSpeaking = false
+    private var pendingFeedback: String? = null
     private val bufferSize = 2 * AudioRecord.getMinBufferSize(
         SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
     )
@@ -428,25 +429,55 @@ class ConversationController(
     // TTS via QiSDK
     // ─────────────────────────────────────────────────────────────────────
 
-    private suspend fun sayMessage(text: String) = withContext(Dispatchers.IO) {
+//    suspend fun sayMessage(text: String) = withContext(Dispatchers.IO) {
+//        try {
+//            isSpeaking = true
+//            val locale = if (language == "en-US")
+//                Locale(Language.ENGLISH, Region.UNITED_STATES)
+//            else
+//                Locale(Language.ITALIAN, Region.ITALY)
+//
+//            val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
+//            SayBuilder.with(qiContext)
+//                .withPhrase(phrase)
+//                .withLocale(locale)
+//                .build()
+//                .run()
+//        } catch (e: Exception) {
+//            Log.e(TAG, "sayMessage error: ${e.message}")
+//        } finally {
+//            isSpeaking = false
+//        }
+//    }
+    suspend fun sayMessage(text: String, isActionFeedback: Boolean = false) = withContext(Dispatchers.IO) {
+        if (isSpeaking) {
+            if (isActionFeedback) {
+                // Non perdiamo feedback importanti — li accodiamo
+                pendingFeedback = text
+                Log.d(TAG, "Feedback queued: $text")
+            }
+            return@withContext
+        }
+        isSpeaking = true
         try {
-            isSpeaking = true
-            val locale = if (language == "en-US")
-                Locale(Language.ENGLISH, Region.UNITED_STATES)
-            else
-                Locale(Language.ITALIAN, Region.ITALY)
-
-            val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
-            SayBuilder.with(qiContext)
-                .withPhrase(phrase)
-                .withLocale(locale)
-                .build()
-                .run()
-        } catch (e: Exception) {
-            Log.e(TAG, "sayMessage error: ${e.message}")
+            speak(text)
+            // Dopo aver finito, controlla se c'è un feedback in attesa
+            pendingFeedback?.let { pending ->
+                pendingFeedback = null
+                speak(pending)
+            }
         } finally {
             isSpeaking = false
         }
+    }
+
+    private fun speak(text: String) {
+        val locale = if (language == "en-US")
+            Locale(Language.ENGLISH, Region.UNITED_STATES)
+        else
+            Locale(Language.ITALIAN, Region.ITALY)
+        val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
+        SayBuilder.with(qiContext).withPhrase(phrase).withLocale(locale).build().run()
     }
 
     // ─────────────────────────────────────────────────────────────────────

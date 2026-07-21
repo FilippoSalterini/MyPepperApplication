@@ -95,8 +95,9 @@ class RobotManager(
                 managerScope.launch {
                     modeMutex.withLock {
                         cleanStopServoing()
-                        withContext(Dispatchers.Main) { listener?.onObjectReached(label, box) }
                     }
+                    conversationController?.sayMessage("I found the $label!", isActionFeedback = true)
+                    withContext(Dispatchers.Main) { listener?.onObjectReached(label, box) }
                 }
             }
             override fun onObjectLost(labels: List<String>) {
@@ -104,6 +105,8 @@ class RobotManager(
                 managerScope.launch {
                     modeMutex.withLock {
                         cleanStopServoing()
+                        val labelStr = labels.joinToString(", ")
+                        conversationController?.sayMessage("I couldn't find the $labelStr, sorry.", isActionFeedback = true)
                         withContext(Dispatchers.Main) {
                             listener?.onObjectLost(labels)
                             listener?.onServoingStopped()
@@ -275,9 +278,15 @@ class RobotManager(
                     humanToFollow       = human,
                     followHumanListener = object : FollowHuman.FollowHumanListener {
                         override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
-                        override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman() }
-                        override fun onCantReachHuman()                  { listener?.onCantReachHuman() }
-                        override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen() }
+                        override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman()
+                        managerScope.launch { conversationController?.sayMessage("I'm close enough!") }
+                        }
+                        override fun onCantReachHuman()                  { listener?.onCantReachHuman()
+                        managerScope.launch { conversationController?.sayMessage("I'm having trouble reaching you!") }
+                        }
+                        override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen()
+                        managerScope.launch { conversationController?.sayMessage("I can't move, my charging flap is open!") }
+                        }
                         override fun onDistanceToHumanChanged(distance: Double) { listener?.onDistanceChanged(distance) }
                     }
                 ).also { it.start() }
@@ -426,18 +435,27 @@ class RobotManager(
                                 modeMutex.withLock {
                                     approachHuman = null
                                     setMode(RobotMode.IDLE)
+                                    conversationController?.sayMessage("I'm right here with you now.",isActionFeedback = true)
                                     withContext(Dispatchers.Main) { listener?.onCloseEnoughToHuman() }
                                 }
                             }
                         }
                         override fun onNoHumanFound() {
                             managerScope.launch {
-                                modeMutex.withLock { setMode(RobotMode.IDLE) }
+                                modeMutex.withLock {
+                                    approachHuman=null
+                                    setMode(RobotMode.IDLE)
+                                    conversationController?.sayMessage("I couldn't find anyone to approach.",isActionFeedback = true)
+                                }
                             }
                         }
                         override fun onApproachFailed() {
                             managerScope.launch {
-                                modeMutex.withLock { setMode(RobotMode.IDLE) }
+                                modeMutex.withLock {
+                                    approachHuman=null
+                                    setMode(RobotMode.IDLE)
+                                    conversationController?.sayMessage("I had trouble approaching, sorry.",isActionFeedback = true)
+                                }
                             }
                         }
                         override fun onDistanceChanged(distance: Double) {
@@ -484,6 +502,7 @@ class RobotManager(
                                     findHuman = null
                                     lastKnownPerson = human   // ← state tracking
                                     setMode(RobotMode.IDLE)
+                                    conversationController?.sayMessage("I found you! I can see you now.",isActionFeedback = true)
                                     withContext(Dispatchers.Main) { listener?.onPersonFound(human) }
                                 }
                             }
@@ -493,6 +512,7 @@ class RobotManager(
                                 modeMutex.withLock {
                                     findHuman = null
                                     setMode(RobotMode.IDLE)
+                                    conversationController?.sayMessage("I looked around but I couldn't find anyone.",isActionFeedback = true)
                                     withContext(Dispatchers.Main) { listener?.onPersonNotFound() }
                                 }
                             }
@@ -531,9 +551,10 @@ class RobotManager(
             it.onMotionCommand = { cmd ->
                 when {
                     cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
-                    cmd == CMD_STOP     -> managerScope.launch {
-                        movementController.stopMovement()
-                    }
+                    cmd == CMD_STOP     -> stopAll()
+                //        managerScope.launch {
+                //        movementController.stopMovement()
+                //    }
                     cmd == CMD_APPROACH -> startApproachHuman()
                     cmd.startsWith("track:") -> {
                         val label = cmd.removePrefix("track:")

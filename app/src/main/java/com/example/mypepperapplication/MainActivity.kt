@@ -17,7 +17,6 @@ import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.ui.UiController
 import com.example.mypepperapplication.vision.BoundingBox
 import com.aldebaran.qi.sdk.`object`.human.Human
-
 // ================================================================
 // Main Activity
 // ================================================================
@@ -31,12 +30,10 @@ import com.aldebaran.qi.sdk.`object`.human.Human
  *   Resto : logica robot → RobotManager, logica UI → UiController.
  */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
-
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_AUDIO = 100
     }
-
     private lateinit var binding: ActivityMainBinding
     private lateinit var ui: UiController
     private lateinit var robotManager: RobotManager
@@ -79,9 +76,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
             detectionController.serverUrl = AppConfig.DETECTION_SERVER_URL
             onUserSpeechUi  = { text -> ui { ui.addUserMessage(text) } }
             onRobotSpeechUi = { text -> ui { ui.addRobotMessage(text) } }
-
         }
-
         bindUiToRobot()
     }
 
@@ -100,36 +95,33 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
             ui { ui.showToast("Searching the human…") }
             robotManager.startFollowHumanAutoDetect(
                 onNoHumanFound = { ui { ui.showToast("No human detected") } }
-            )
-        }
+            ) }
         ui.onApproachHuman = {
             ui { ui.showToast("Searching for human…") }
-            robotManager.startApproachHuman()
-        }
+            robotManager.startApproachHuman() }
         ui.onStopApproachHuman = { robotManager.stopApproachHuman() }
         ui.onStopFollowHuman = { robotManager.stopFollowHuman() }
         ui.onFindHuman = {
             ui { ui.showToast("Searching for person…") }
-            robotManager.startFindPerson()
-        }
+            robotManager.startFindPerson() }
         ui.onStopFindHuman = { robotManager.stopFindPerson() }
         ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
         ui.onStopTracking = { robotManager.stopVisualServoing() }
 
     }
     private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
-        override fun onModeChanged(mode: RobotMode)         = ui { ui.updateForMode(mode) }
-        override fun onFollowingHuman()                     = ui { ui.showToast("Following the human…") }
-        override fun onCloseEnoughToHuman()                 = ui { ui.showToast("I'm close! I'll stop") }
-        override fun onCantReachHuman()                     = ui { ui.showToast("I cannot reach the human!") }
-        override fun onDistanceChanged(meters: Double)      = ui { ui.updateDistance(meters) }
-        override fun onServoingStarted(labels: List<String>)= ui { ui.showToast("Searching: ${labels.joinToString(", ")}") }
-        override fun onServoingStopped()                    = ui { ui.showToast("Visual Servoing stopped") }
+        override fun onModeChanged(mode: RobotMode)                   = ui { ui.updateForMode(mode) }
+        override fun onFollowingHuman()                               = ui { ui.showToast("Following the human…") }
+        override fun onCloseEnoughToHuman()                           = ui { ui.showToast("I'm close! I'll stop") }
+        override fun onCantReachHuman()                               = ui { ui.showToast("I cannot reach the human!") }
+        override fun onDistanceChanged(meters: Double)                = ui { ui.updateDistance(meters) }
+        override fun onServoingStarted(labels: List<String>)          = ui { ui.showToast("Searching: ${labels.joinToString(", ")}") }
+        override fun onServoingStopped()                              = ui { ui.showToast("Visual Servoing stopped") }
         override fun onObjectReached(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
-        override fun onObjectLost(labels: List<String>)     = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
-        override fun onChargingFlapOpen()                   = ui { ui.showToast("Charging flap open — movement blocked") }
-        override fun onPersonFound(human: Human)            = ui { ui.showToast("Person found!") }
-        override fun onPersonNotFound()                     = ui { ui.showToast("No person found") }
+        override fun onObjectLost(labels: List<String>)               = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
+        override fun onChargingFlapOpen()                             = ui { ui.showToast("Charging flap open — movement blocked") }
+        override fun onPersonFound(human: Human)                      = ui { ui.showToast("Person found!") }
+        override fun onPersonNotFound()                               = ui { ui.showToast("No person found") }
     }
     private fun ui(block: () -> Unit) = runOnUiThread(block)
 }

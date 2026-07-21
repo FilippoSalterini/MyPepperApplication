@@ -34,13 +34,28 @@ class VisualServoingController(
     var headOnlyZone:     Float  = 0.05f
     var lpfAlpha:         Float  = 0.5f
     var maxMissedFrames:  Int    = 10
-    var maxMissedFramesApproach: Int = 5 //CHECK
+    var maxMissedFramesApproach: Int = 7
     var cycleDelayMs:     Long   = 250L
 
     var centeredFrames = 0
     val centeredRequired = 3
 
-    // Parametri di Scan
+    /*
+    Parametri di Scan
+
+    Viene poi definito halfSteps che sarà la metà di scanStepRad.
+    angoli di destra 7 * 0.25rad = 1.75rad totale (circa 100°)
+    angoli di sinistra 7 * -0.25rad = -1.75rad totale (circa 100°)
+    la copertura totale non copre 360°, infatti era pensato per coprire
+    la parte della stanza d'interesse, ma cio implicherebbe comunque integrare
+    un orientamento verso il muro, quindi possibilità di cambiare gli step per
+    ottenere circa 360° di copertura quindi
+
+    var scanStepRad: Double = 0.25
+    var scanSteps:   Int    = 26
+    Ovviamente questo aumenterebbe il tempo di esecuzione ma permette di coprire tutta la
+    stanza -> TODO verifica in fase di sperimentazione
+     */
     var scanStepRad:      Double = 0.25
     var scanSteps:        Int    = 14
     private val approachCorrectionZone = 0.25f
@@ -395,10 +410,11 @@ class VisualServoingController(
             Log.i(TAG, "Requesting tracking job cancellation...")
             trackingJob?.cancel()
             try {
+                // verifica se portare a 2000L il timeout -> per logica PLANNER
                 withTimeoutOrNull(500L) { trackingJob?.join() }
             } catch (e: Exception) {
-             // try { trackingJob?.join() } catch (e: Exception) {
-                Log.w(TAG, "Error joining job: ${e.message}") }
+                Log.w(TAG, "Error joining job: ${e.message}")
+            }
         }
         trackingJob = null
         movementController.stopMovement()
