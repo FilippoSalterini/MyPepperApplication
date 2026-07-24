@@ -58,14 +58,14 @@ class VisualServoingController(
      */
     var scanStepRad:      Double = 0.25
     var scanSteps:        Int    = 14
-    private val approachCorrectionZone = 0.25f
+    private val approachCorrectionZone = 0.30f // era 0.25
 
     // Stall detector
     private val stallThreshold = 0.003f
     private val stallMaxFrames = 8
-    var scanDelayMs:        Long   = 300L
+    var scanDelayMs : Long   = 300L
 
-    var listener: VisualServoingListener? = null
+    var listener : VisualServoingListener? = null
 
     private var smoothErrX = 0f
     private var smoothErrY = 0f
@@ -148,13 +148,13 @@ class VisualServoingController(
             permettendo ai comandi inviati alla testa di essere morbidi
              */
             var rotateStallCount = 0
-            var lastRawErrX = 0f
-            var nearZoneFrames = 0
+            var lastRawErrX      = 0f
+            var nearZoneFrames   = 0
             val nearZoneRequired = 4
-            var missedFrames  = 0
-            centeredFrames    = 0
-            smoothErrX        = 0f
-            smoothErrY        = 0f
+            var missedFrames     = 0
+            centeredFrames       = 0
+            smoothErrX           = 0f
+            smoothErrY           = 0f
 
             headController.stopGaze()
             delay(150L)
@@ -222,8 +222,6 @@ class VisualServoingController(
                         movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
                         smoothErrX = 0f
                         smoothErrY = 0f
-
-                        //
                         headController.setGaze(normErrX = 0f, normErrY = -0.1f)
                         delay(300L)
 
@@ -275,8 +273,13 @@ class VisualServoingController(
             var lastArea    = 0f
             var slowApproachStarted = false
 
-            headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
+            //inizio fix
+            smoothErrX = 0f
+            smoothErrY = 0f
+            headController.setGaze(normErrX = 0f, normErrY = 0f)
+            //fine fix
 
+            //headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
             movementController.moveTowardAsync(distanceMeters = 1.5)
             delay(400L)
 
@@ -309,8 +312,9 @@ class VisualServoingController(
                 val rawErrX = target.cx - 0.5f
                 val rawErrY = target.cy - 0.5f
 
-                smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
-                smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
+                val approachAlpha = 0.7f
+                smoothErrX = approachAlpha * rawErrX + (1f - approachAlpha) * smoothErrX
+                smoothErrY = approachAlpha * rawErrY + (1f - approachAlpha) * smoothErrY
 
                 headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
 

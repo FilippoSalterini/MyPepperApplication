@@ -47,6 +47,9 @@ private const val AZURE_REGION      = "westeurope"
 const val CMD_FOLLOW  = "follow"
 const val CMD_STOP    = "stop"
 const val CMD_APPROACH = "approach"
+const val CMD_START_MAP = "start_map"
+const val CMD_STOP_MAP  = "stop_map"
+const val CMD_LOAD_MAP  = "load_map"
 
 class ConversationController(
     private val context: Context,
@@ -88,9 +91,12 @@ class ConversationController(
 
     // ── Motion keyword table (English) ────────────────────────────────────
     private val motionCommands: Map<String, List<String>> = mapOf(
-        CMD_FOLLOW   to listOf("follow me", "come with me", "come along", "follow"),
-        CMD_STOP     to listOf("stop", "wait", "stay", "hold on", "stand still"),
-        CMD_APPROACH to listOf("come here", "come closer", "get closer", "approach me")
+        CMD_FOLLOW    to listOf("follow me", "come with me", "come along", "follow"),
+        CMD_STOP      to listOf("stop", "wait", "stay", "hold on", "stand still"),
+        CMD_APPROACH  to listOf("come here", "come closer", "get closer", "approach me"),
+        CMD_START_MAP to listOf("start mapping", "start the map"),
+        CMD_STOP_MAP  to listOf("stop mapping", "finish mapping", "stop the mapping"),
+        CMD_LOAD_MAP  to listOf("restore map", "load map", "load the map", "restore the map")
     )
 
     // Confirmation phrases Pepper says before executing the command
@@ -113,6 +119,16 @@ class ConversationController(
 
     private fun isTrackIntent(sentence: String): Boolean =
         trackTriggers.any { sentence.lowercase().contains(it) }
+
+    private fun extractSavePoiName(sentence: String): String? {
+        val lower = sentence.lowercase()
+        return if (lower.startsWith("save ")) lower.removePrefix("save ").trim() else null
+    }
+
+    private fun extractGoToPoiName(sentence: String): String? {
+        val lower = sentence.lowercase()
+        return if (lower.startsWith("go to")) lower.removePrefix("go to").trim() else null
+    }
 
     private suspend fun extractLabel(sentence: String): String = withContext(Dispatchers.IO) {
         try {
@@ -140,7 +156,7 @@ class ConversationController(
     suspend fun startConversationLoop() {
         isRunning = true
         Log.i(TAG, "Starting conversation loop")
-    // calibrate_threshold serve per misurare il rumore ambientale
+        // calibrate_threshold serve per misurare il rumore ambientale
         withContext(Dispatchers.IO) { calibrateThreshold() }
 
         val welcome = sentenceGenerator.getPredefinedSentence(language, "welcome_back")
@@ -175,6 +191,17 @@ class ConversationController(
                 onMotionCommand?.invoke(matchedCmd)   // RobotManager handles the rest
                 continue
             }
+
+            // 2b. Save/GoTo PoI intent — parametrized, stesso pattern di track:$label più sotto
+            extractSavePoiName(userSentence)?.let { name ->
+                onMotionCommand?.invoke("save_poi:$name")
+                continue
+            }
+            extractGoToPoiName(userSentence)?.let { name ->
+                onMotionCommand?.invoke("goto_poi:$name")
+                continue
+            }
+
             // 3. Track object intent
             if (isTrackIntent(userSentence)) {
                 val label = extractLabel(userSentence)
@@ -219,10 +246,10 @@ class ConversationController(
 
     private fun matchMotionCommand(sentence: String): String? {
         val lower = sentence.lowercase()
-        for ((cmd, keywords) in motionCommands) {
-            if (keywords.any { lower.contains(it) }) return cmd
-        }
-        return null
+        return motionCommands.entries
+            .flatMap { (cmd, keywords) -> keywords.filter { lower.contains(it) }.map { cmd to it } }
+            .maxByOrNull { it.second.length }
+            ?.first
     }
 
     // ─────────────────────────────────────────────────────────────────────

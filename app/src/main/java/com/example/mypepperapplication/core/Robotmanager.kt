@@ -17,9 +17,14 @@ import com.example.mypepperapplication.vision.ObjectDetectionController
 import com.example.mypepperapplication.vision.PepperCameraController
 import com.example.mypepperapplication.vision.VisualServoingController
 import com.example.mypepperapplication.conversation.ConversationController
+import com.example.mypepperapplication.conversation.CMD_START_MAP
+import com.example.mypepperapplication.conversation.CMD_STOP_MAP
+import com.example.mypepperapplication.conversation.CMD_LOAD_MAP
 import com.example.mypepperapplication.conversation.CMD_FOLLOW
 import com.example.mypepperapplication.conversation.CMD_STOP
 import com.example.mypepperapplication.conversation.CMD_APPROACH
+import com.example.mypepperapplication.navigation.NavigationController
+import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
 import kotlinx.coroutines.*
@@ -32,17 +37,13 @@ import java.util.TimerTask
 // RobotManager
 // =============================================================================
 /**
- * Orchestratore centrale di logica robot:
- *   - startFollowHuman / stopFollowHuman
- *   - startVisualServoing / stopVisualServoing
- *   - processSnapshot
+ * Orchestratore centrale di logica robot
  */
 class RobotManager(
     private val listener: RobotManagerListener? = null,
     private val context: Context,
     private val azureKey: String,
     private val serverIp: String
-
 ) {
     interface RobotManagerListener {
         fun onModeChanged(mode: RobotMode)
@@ -79,7 +80,11 @@ class RobotManager(
     private var followHuman: FollowHuman? = null
     private var approachHuman: ApproachHuman? = null
     private var findHuman: FindHuman? = null
+    private var mappingJob: Job? = null
+
     private var conversationController: ConversationController? = null
+    private var navigationController: NavigationController? = null
+    private val mapFile: File by lazy { File(context.filesDir, "map.bin") }
     private var conversationJob: Job? = null
     private val currentMode = AtomicReference(RobotMode.IDLE)
     var onUserSpeechUi:  ((String) -> Unit)? = null
@@ -122,6 +127,7 @@ class RobotManager(
         cameraController.onRobotReady(ctx)
         headController.onRobotReady(ctx)
         servoingController.onRobotReady()
+        navigationController = NavigationController(ctx)
         Log.i(TAG, "Robot ready")
         startConversationService(ctx)
     }
@@ -133,6 +139,7 @@ class RobotManager(
         conversationController = null
         conversationJob?.cancel()
         conversationJob = null
+        navigationController = null
         stopAll()
         movementController.onRobotLost()
         cameraController.onRobotLost()
@@ -552,16 +559,69 @@ class RobotManager(
                 when {
                     cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
                     cmd == CMD_STOP     -> stopAll()
-                //        managerScope.launch {
-                //        movementController.stopMovement()
-                //    }
                     cmd == CMD_APPROACH -> startApproachHuman()
                     cmd.startsWith("track:") -> {
                         val label = cmd.removePrefix("track:")
                         startVisualServoing(label)
                     }
+                    cmd == CMD_START_MAP -> managerScope.launch {
+                        modeMutex.withLock {
+                            if (mappingJob?.isActive == true) { Log.w(TAG, "Mapping already running"); return@withLock }
+                            holdForServoing()
+                            mappingJob = managerScope.launch { navigationController?.localizeAndMap(false) }
+                        }
+                    }
+                    cmd == CMD_STOP_MAP -> managerScope.launch {
+                        navigationController?.stopCurrentAction()
+                        mappingJob?.join()
+                        navigationController?.persistPois()
+                        navigationController?.saveMapToFile(mapFile)
+                        releaseForServoing()
+                        Log.i(TAG, "Map saved to $mapFile")
+                    }
+                    cmd == CMD_LOAD_MAP -> managerScope.launch {
+                        modeMutex.withLock {
+                            val loaded = navigationController?.loadMapFromFile(mapFile) ?: false
+                            if (!loaded) { Log.w(TAG, "Nessuna mappa trovata su file"); return@withLock }
+                            holdForServoing()
+                            val localized = navigationController?.localize() ?: false
+                            releaseForServoing()
+                            if (localized) {
+                                navigationController?.loadPois()
+                                Log.i(TAG, "Localizzazione riuscita, PoI caricati")
+                            } else {
+                                Log.w(TAG, "Localizzazione fallita")
+                            }
+                        }
+                    }
+                    cmd.startsWith("save_poi:") -> managerScope.launch {
+                        val name = cmd.removePrefix("save_poi:")
+                        Log.i(TAG, "Saving PoI: $name")
+                        navigationController?.saveCurrentPositionAsPoi(name)
+                        Log.i(TAG, "PoI saved: $name")
+                    }
+                    cmd.startsWith("goto_poi:") -> managerScope.launch {
+                        val name = cmd.removePrefix("goto_poi:")
+                        Log.i(TAG, "GoTo requested: $name")
+                        val status = navigationController?.moveTo(name)
+                        Log.i(TAG, "GoTo $name result: $status")
+                    }
                 }
             }
+            // it.onMotionCommand = { cmd ->
+            //     when {
+            //         cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
+            //         cmd == CMD_STOP     -> stopAll()
+            //     //        managerScope.launch {
+            //     //        movementController.stopMovement()
+            //     //    }
+            //         cmd == CMD_APPROACH -> startApproachHuman()
+            //         cmd.startsWith("track:") -> {
+            //             val label = cmd.removePrefix("track:")
+            //             startVisualServoing(label)
+            //         }
+            //     }
+            // }
             it.onUserSpeech  = { text ->
                 Log.i(TAG, "User: $text")
                 // callback verso MainActivity per aggiornare UI
