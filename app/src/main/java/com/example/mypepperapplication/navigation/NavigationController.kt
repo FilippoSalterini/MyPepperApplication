@@ -1,6 +1,9 @@
 package com.example.mypepperapplication.navigation
 
 import android.util.Log
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.google.gson.Gson
 import com.aldebaran.qi.Future
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.builder.GoToBuilder
@@ -14,35 +17,50 @@ import com.aldebaran.qi.sdk.`object`.actuation.Frame
 import com.aldebaran.qi.sdk.`object`.actuation.OrientationPolicy
 import com.aldebaran.qi.sdk.`object`.actuation.PathPlanningPolicy
 import com.aldebaran.qi.sdk.`object`.geometry.Quaternion
+import com.aldebaran.qi.sdk.`object`.actuation.LocalizationStatus
+import com.aldebaran.qi.sdk.`object`.actuation.Localize.OnStatusChangedListener
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.coroutines.resume
 import kotlin.math.atan2
+import java.io.File
+
 
 class NavigationController(private val qiContext: QiContext) {
-
+    enum class GoToStatus { FAILED, CANCELLED, FINISHED }
+    companion object { private const val TAG = "NavigationController" }
     private var explorationMap: ExplorationMap? = null
     private var currentLocalizeFuture: Future<Void>? = null
 
     private val poiFrames = mutableMapOf<String, AttachedFrame>()
     private val poiStore = PoiStore(File(qiContext.filesDir, "pois.json"))
+    private val trajectoryPoints = mutableListOf<Triple<Double, Double, Double>>() // x, y, theta
+    private var samplingJob: Job? = null
+    private val trajectoryStore = File(qiContext.filesDir, "trajectory.json")
+
     // --- SETUP: mappatura guidata, una tantum ---
 
-    suspend fun localizeAndMap(withExistingMap: Boolean): Boolean = withContext(Dispatchers.IO) {
+    suspend fun localizeAndMap(withExistingMap: Boolean, samplingScope: CoroutineScope): Boolean = withContext(Dispatchers.IO) {
         val action = LocalizeAndMapBuilder.with(qiContext)
             .apply { if (withExistingMap && explorationMap != null) withMap(explorationMap) }
             .build()
         val future = action.async().run()
         currentLocalizeFuture = future
-        try { future.get() } catch (_: Exception) { /* atteso -> stop manuale */ }
+        startTrajectorySampling(samplingScope)
+        try { future.get() } catch (_: Exception) { }
+        stopTrajectorySampling()
 
         if (future.hasError()) {
             Log.w(TAG, "LocalizeAndMap error: ${future.error}")
             return@withContext false
         }
-        // sia su cancellazione volontaria che su fine naturale, dumpiamo la mappa
         explorationMap = action.async().dumpMap().get()
         true
     }
@@ -64,69 +82,31 @@ class NavigationController(private val qiContext: QiContext) {
     }
 
     // --- RUNTIME: rilocalizzazione + navigazione verso i PoI salvati ---
-    //                      LOCALIZE 2 VERSIONS
-//    suspend fun localize(): Boolean = withContext(Dispatchers.IO) {
-//        val map = explorationMap
-//        if (map == null) {
-//            Log.e(TAG, "LOCALIZE: explorationMap is NULL")
-//            return@withContext false
-//        }
-//        Log.i(TAG, "LOCALIZE: starting localization")
-//        try {
-//            val localize = LocalizeBuilder
-//                .with(qiContext)
-//                .withMap(map)
-//                .build()
-//            Log.i(TAG, "LOCALIZE: Localize action built")
-//            val future = localize.async().run()
-//            Log.i(TAG, "LOCALIZE: action started")
-//            future.get()
-//            Log.i(TAG, "LOCALIZE: future.get() completed")
-//            Log.i(
-//                TAG,
-//                "LOCALIZE: success=${future.isSuccess}, " +
-//                        "cancelled=${future.isCancelled}, " +
-//                        "hasError=${future.hasError()}, " +
-//                        "error=${future.error}"
-//            )
-//            return@withContext future.isSuccess
-//        } catch (e: Exception) {
-//            Log.e(TAG, "LOCALIZE: exception during localization", e)
-//            return@withContext false
-//        }
-//    }
-
     suspend fun localize(): Boolean = withContext(Dispatchers.IO) {
-        Log.d(TAG, "LOCALIZE: start")
-        val map = explorationMap
-        if (map == null) {
-            Log.e(TAG, "LOCALIZE: explorationMap is NULL")
-            return@withContext false
-        }
-        Log.d(TAG, "LOCALIZE: building Localize object")
+        val map = explorationMap ?: return@withContext false
         val localize = LocalizeBuilder.with(qiContext).withMap(map).build()
-        Log.d(TAG, "LOCALIZE: starting async run()")
         val future = localize.async().run()
         currentLocalizeFuture = future
-        val completed = withTimeoutOrNull(30_000L) {
-            try {
-                Log.d(TAG, "LOCALIZE: waiting for future.get()")
-                future.get().also {
-                    Log.d(TAG, "LOCALIZE: future.get() completed successfully")
+
+        val localized = withTimeoutOrNull(90_000L) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                val onStatusChangedListener = OnStatusChangedListener { status ->
+                    Log.i(TAG, "LOCALIZE: status changed -> $status")
+                    if (status == LocalizationStatus.LOCALIZED && cont.isActive) {
+                        cont.resume(true)
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "LOCALIZE: exception during future.get()", e)
-                null
+                localize.addOnStatusChangedListener(onStatusChangedListener)
+                cont.invokeOnCancellation {
+                    localize.removeOnStatusChangedListener(onStatusChangedListener)
+                    future.requestCancellation()
+                }
             }
-        }
-        if (completed == null) {
-            Log.w(TAG, "LOCALIZE: TIMEOUT after 30s, requesting cancellation")
-            future.requestCancellation()
-            return@withContext false
-        }
-        val success = future.isSuccess
-        Log.d(TAG, "LOCALIZE: completed = $completed, isSuccess = $success")
-        success
+        } ?: false
+
+        future.requestCancellation()
+        Log.i(TAG, "LOCALIZE: result=$localized")
+        localized
     }
     fun loadPois() {
         val mapFrame = qiContext.mapping.mapFrame()
@@ -153,20 +133,6 @@ class NavigationController(private val qiContext: QiContext) {
         val mapData: String = map.serialize()
         file.writeText(mapData)
     }
-// LOAD MAP FROM FILE 2 VERSIONS
-//    fun loadMapFromFile(file: File): Boolean {
-//        if (!file.exists()) return false
-//        return try {
-//            val mapData = file.readText()
-//            explorationMap = ExplorationMapBuilder.with(qiContext)
-//                .withMapString(mapData)
-//                .build()
-//            true
-//        } catch (e: Exception) {
-//            Log.w(TAG, "loadMapFromFile error: ${e.message}")
-//            false
-//        }
-//    }
 
 fun loadMapFromFile(file: File): Boolean {
 
@@ -231,8 +197,45 @@ fun loadMapFromFile(file: File): Boolean {
         val cosYaw = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return atan2(sinYaw, cosYaw)
     }
+    // --- Trajectory sampling (per VISUALIZZAZZIONE) ---
 
-    enum class GoToStatus { FAILED, CANCELLED, FINISHED }
+    private fun startTrajectorySampling(scope: CoroutineScope) {
+        trajectoryPoints.clear()
+        samplingJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val mapFrame = qiContext.mapping.mapFrame()
+                    val robotFrame = qiContext.actuation.robotFrame()
+                    val t = robotFrame.computeTransform(mapFrame).transform
+                    trajectoryPoints.add(Triple(t.translation.x, t.translation.y, yawFromQuaternion(t.rotation)))
+                } catch (_: Exception) { /* ignora campioni falliti */ }
+                delay(700L)
+            }
+        }
+    }
 
-    companion object { private const val TAG = "NavigationController" }
+    private fun stopTrajectorySampling() {
+        samplingJob?.cancel()
+        samplingJob = null
+    }
+
+    fun saveTrajectoryToFile() {
+        val gson = Gson()
+        val json = gson.toJson(trajectoryPoints.map { mapOf("x" to it.first, "y" to it.second, "theta" to it.third) })
+        trajectoryStore.writeText(json)
+        Log.i(TAG, "Trajectory saved: ${trajectoryPoints.size} points -> $trajectoryStore")
+    }
+
+    fun getMapBitmap(): Bitmap? {
+        val map = explorationMap ?: return null
+        return try {
+            val byteBuffer = map.topGraphicalRepresentation.image.data.apply { rewind() }
+            val size = byteBuffer.remaining()
+            val byteArray = ByteArray(size).also { byteBuffer.get(it) }
+            BitmapFactory.decodeByteArray(byteArray, 0, size)
+        } catch (e: Exception) {
+            Log.e(TAG, "getMapBitmap error: ${e.message}")
+            null
+        }
+    }
 }

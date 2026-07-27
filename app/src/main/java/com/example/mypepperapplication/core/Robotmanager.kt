@@ -32,12 +32,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Timer
 import java.util.TimerTask
+import android.graphics.Bitmap
+import java.io.FileOutputStream
 
 // =============================================================================
 // RobotManager
 // =============================================================================
 /**
  * Orchestratore centrale di logica robot
+ * Per ricavare informazioni sulla mappa:
+ * adb shell run-as com.example.mypepperapplication cat files/map_preview.png > map_preview.png
  */
 class RobotManager(
     private val listener: RobotManagerListener? = null,
@@ -81,6 +85,7 @@ class RobotManager(
     private var approachHuman: ApproachHuman? = null
     private var findHuman: FindHuman? = null
     private var mappingJob: Job? = null
+    private var localizeJob: Job? = null
 
     private var conversationController: ConversationController? = null
     private var navigationController: NavigationController? = null
@@ -89,7 +94,6 @@ class RobotManager(
     private val currentMode = AtomicReference(RobotMode.IDLE)
     var onUserSpeechUi:  ((String) -> Unit)? = null
     var onRobotSpeechUi: ((String) -> Unit)? = null
-
     // disabilitare autonomous abilities
     private var servoingHolder: Holder? = null
     val mode: RobotMode get() = currentMode.get()
@@ -568,29 +572,37 @@ class RobotManager(
                         modeMutex.withLock {
                             if (mappingJob?.isActive == true) { Log.w(TAG, "Mapping already running"); return@withLock }
                             holdForServoing()
-                            mappingJob = managerScope.launch { navigationController?.localizeAndMap(false) }
-                        }
+                            mappingJob = managerScope.launch { navigationController?.localizeAndMap(false, managerScope) }                        }
                     }
                     cmd == CMD_STOP_MAP -> managerScope.launch {
                         navigationController?.stopCurrentAction()
                         mappingJob?.join()
                         navigationController?.persistPois()
                         navigationController?.saveMapToFile(mapFile)
+                        navigationController?.saveTrajectoryToFile()
+                        navigationController?.getMapBitmap()?.let { bmp ->
+                            val imgFile = File(context.filesDir, "map_preview.png")
+                            FileOutputStream(imgFile).use { out ->
+                                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                            }
+                            Log.i(TAG, "Map preview saved to $imgFile")
+                        }
                         releaseForServoing()
                         Log.i(TAG, "Map saved to $mapFile")
                     }
                     cmd == CMD_LOAD_MAP -> managerScope.launch {
                         modeMutex.withLock {
+                            if (localizeJob?.isActive == true) { Log.w(TAG, "Localize already running"); return@withLock }
                             val loaded = navigationController?.loadMapFromFile(mapFile) ?: false
                             if (!loaded) { Log.w(TAG, "Nessuna mappa trovata su file"); return@withLock }
-                            holdForServoing()
-                            val localized = navigationController?.localize() ?: false
-                            releaseForServoing()
-                            if (localized) {
-                                navigationController?.loadPois()
-                                Log.i(TAG, "Localizzazione riuscita, PoI caricati")
-                            } else {
-                                Log.w(TAG, "Localizzazione fallita")
+                            localizeJob = managerScope.launch {
+                                val localized = navigationController?.localize() ?: false
+                                if (localized) {
+                                    navigationController?.loadPois()
+                                    Log.i(TAG, "Localizzazione riuscita, PoI caricati")
+                                } else {
+                                    Log.w(TAG, "Localizzazione fallita")
+                                }
                             }
                         }
                     }
@@ -608,20 +620,6 @@ class RobotManager(
                     }
                 }
             }
-            // it.onMotionCommand = { cmd ->
-            //     when {
-            //         cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
-            //         cmd == CMD_STOP     -> stopAll()
-            //     //        managerScope.launch {
-            //     //        movementController.stopMovement()
-            //     //    }
-            //         cmd == CMD_APPROACH -> startApproachHuman()
-            //         cmd.startsWith("track:") -> {
-            //             val label = cmd.removePrefix("track:")
-            //             startVisualServoing(label)
-            //         }
-            //     }
-            // }
             it.onUserSpeech  = { text ->
                 Log.i(TAG, "User: $text")
                 // callback verso MainActivity per aggiornare UI
