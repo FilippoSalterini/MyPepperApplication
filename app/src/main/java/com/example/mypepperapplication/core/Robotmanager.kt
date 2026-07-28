@@ -39,9 +39,38 @@ import java.io.FileOutputStream
 // RobotManager
 // =============================================================================
 /**
- * Orchestratore centrale di logica robot
+ * Orchestratore e gestore centrale dello stato del robot Pepper coordinando l'hardware, i controller di movimento,
+ * la visione artificiale e la logica di conversazione.
+ *
+ * Le sue responsabilità principali includono:
+ * - **Gestione della Concorrenza e degli Stati**: Regola la modalità operativa corrente ([RobotMode])
+ *   garantendo la thread-safety e transizioni atomiche tramite un [Mutex] (`modeMutex`), prevenendo
+ *   conflitti tra azioni concorrenti (es. insegui umano vs. tracciamento oggetto).
+ *
+ * - **Coordinamento dei Moduli**: Integre e gestisce il ciclo di vita dei controller di movimento
+ *   ([PepperMovementController], [HeadMovementController]), della fotocamera ([PepperCameraController])
+ *   e della visione artificiale ([ObjectDetectionController], [VisualServoingController]).
+ *
+ * - **Interazione Umana**: Gestisce i flussi di ricerca, avvicinamento e inseguimento delle persone
+ *   ([FindHuman], [ApproachHuman], [FollowHuman]) integrando logiche di rilascio/puntamento dinamico.
+ *
+ * - **Gestione Abilità Autonome**: Sospende o ripristina le abilità di base di Pepper
+ *   ([AutonomousAbilitiesType]) tramite [Holder] per evitare interferenze durante compiti specifici
+ *   (es. Visual Servoing o Mappatura).
+ *
+ * - **Integrazione Navigazione & Conversazione**: Collega il [ConversationController] con il
+ *   [NavigationController] per tradurre i comandi vocali/multimodali ricevuti in azioni concrete
+ *   (avvio/stop mappatura, salvataggio e navigazione verso i PoI, salvataggio di preview grafiche della mappa).
+ *
  * Per ricavare informazioni sulla mappa:
- * adb shell run-as com.example.mypepperapplication cat files/map_preview.png > map_preview.png
+ * - (controlla) adb shell run-as com.example.mypepperapplication cat files/map_preview.png > map_preview.png
+ * - cmd /c "adb exec-out run-as com.example.mypepperapplication cat files/map_preview.png > map_preview.png"
+ * - Format-Hex map_preview.png -Count 8
+ *
+ * @property listener Interfaccia di callback [RobotManagerListener] per notificare gli eventi di stato all'UI/MainActivity.
+ * @property context Il contesto Android dell'applicazione.
+ * @property azureKey Chiave API per i servizi vocali/conversazionali Azure.
+ * @property serverIp Indirizzo IP del server backend per l'elaborazione dei comandi o l'LLM.
  */
 class RobotManager(
     private val listener: RobotManagerListener? = null,
@@ -599,6 +628,7 @@ class RobotManager(
                                 val localized = navigationController?.localize() ?: false
                                 if (localized) {
                                     navigationController?.loadPois()
+                                    conversationController?.knownPoiNames = navigationController?.getPoiNames() ?: emptyList()
                                     Log.i(TAG, "Localizzazione riuscita, PoI caricati")
                                 } else {
                                     Log.w(TAG, "Localizzazione fallita")
@@ -610,6 +640,7 @@ class RobotManager(
                         val name = cmd.removePrefix("save_poi:")
                         Log.i(TAG, "Saving PoI: $name")
                         navigationController?.saveCurrentPositionAsPoi(name)
+                        conversationController?.knownPoiNames = navigationController?.getPoiNames() ?: emptyList()
                         Log.i(TAG, "PoI saved: $name")
                     }
                     cmd.startsWith("goto_poi:") -> managerScope.launch {

@@ -30,6 +30,33 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+/**
+ * Gestisce il ciclo di conversazione, l'interazione vocale e l'integrazione con l'LLM per il robot Pepper.
+ *
+ * La classe coordina i flussi di Input/Output audio e la comprensione del linguaggio naturale:
+ * - **Cattura Audio & Riconoscimento Vocale (STT)**: Registra l'audio dal microfono a 16kHz applicando
+ *   la cancellazione del rumore ([NoiseSuppressor]) e la calibrazione dinamica della soglia d'ascolto.
+ *   Pezzi d'audio formattati in WAV vengono inviati ai servizi Microsoft Azure Speech per la trascrizione in testo.
+ * - **Intercezione Comandi Vocali (Intent Recognition)**: Analizza il testo dell'utente per identificare
+ *   comandi di movimento/navigazione prima di consultare l'LLM. Gestisce keyword per:
+ *   - Movimento e Inseguimento (`CMD_FOLLOW`, `CMD_STOP`, `CMD_APPROACH`).
+ *   - Gestione Mappe (`CMD_START_MAP`, `CMD_STOP_MAP`, `CMD_LOAD_MAP`).
+ *   - Navigazione Punti di Interesse (`save_poi` e `goto_poi`).
+ *   - Visual Servoing / Ricerca Oggetti (estrazione etichette YOLO tramite l'endpoint `/extract_label`).
+ * - **Integrazione LLM Backend**: Invia i messaggi dell'utente e lo storico conversazionale ([DialogueState])
+ *   al server LLM esterno (porta HTTP POST `/chat`) per generare risposte naturali.
+ * - **Sintesi Vocale (TTS)**: Convertitore Text-to-Speech nativo basato su QiSDK ([SayBuilder]) con
+ *   supporto per la regolazione di velocità, tono, localizzazione e gestione della coda di feedback per azioni in corso.
+ *
+ * @property context Il contesto Android per le autorizzazioni audio e la gestione dei file temporanei.
+ * @property qiContext Il contesto QiSDK del robot per l'esecuzione del TTS nativo.
+ * @property azureKey La chiave di sottoscrizione per i Microsoft Cognitive Speech Services.
+ * @property serverIp L'indirizzo IP del server Python backend per LLM ed estrazione etichette.
+ * @property serverPort La porta del server backend (default 8000).
+ * @property language Codice lingua della conversazione (default "en-US").
+ * @property voiceSpeed Velocità di sintesi vocale QiSDK (default 100).
+ * @property voicePitch Tono/Altezza di sintesi vocale QiSDK (default 100).
+ */
 
 private const val TAG = "ConversationController"
 
@@ -64,6 +91,8 @@ class ConversationController(
     private val dialogueState     = DialogueState() //cronologia conversazione
     private val sentenceGenerator = SentenceGenerator()
 
+    private val saveTriggers = listOf("save", "remember this as", "call this")
+
     private val httpClient = OkHttpClient.Builder() //comunicazione con server python
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -79,16 +108,19 @@ class ConversationController(
         SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
     )
 
+    private fun sanitizeName(raw: String): String =
+        raw.trim().trimEnd('.', ',', '!', '?', ';', ':').trim()
+
     // ── UI callbacks ──────────────────────────────────────────────────────
     var onListening:    (() -> Unit)?       = null
     var onThinking:     (() -> Unit)?       = null
     var onUserSpeech:   ((String) -> Unit)? = null
     var onRobotSpeech:  ((String) -> Unit)? = null
+    var knownPoiNames: List<String> = emptyList()
 
     // ── Motion callback — the ONLY bridge to RobotManager ────────────────
     // RobotManager sets this to handle CMD_FOLLOW / CMD_STOP / CMD_APPROACH
     var onMotionCommand: ((String) -> Unit)? = null
-
     // ── Motion keyword table (English) ────────────────────────────────────
     private val motionCommands: Map<String, List<String>> = mapOf(
         CMD_FOLLOW    to listOf("follow me", "come with me", "come along", "follow"),
@@ -105,7 +137,9 @@ class ConversationController(
         CMD_STOP     to "Ok, stopping.",
         CMD_APPROACH to "Sure, coming closer!"
     )
-
+    private val goToTriggers = listOf(
+        "go to", "take me to", "navigate to", "walk to", "head to", "can you go to"
+    )
     // ── Exit keywords ─────────────────────────────────────────────────────
     private val exitPhrases = listOf("goodbye", "bye", "see you", "that's all")
 /*
@@ -122,14 +156,21 @@ class ConversationController(
 
     private fun extractSavePoiName(sentence: String): String? {
         val lower = sentence.lowercase()
-        return if (lower.startsWith("save ")) lower.removePrefix("save ").trim() else null
+        val trigger = saveTriggers.filter { lower.startsWith("$it ") }.maxByOrNull { it.length } ?: return null
+        val name = sanitizeName(sentence.substring(trigger.length))
+        return name.ifBlank { null }
     }
 
     private fun extractGoToPoiName(sentence: String): String? {
         val lower = sentence.lowercase()
-        return if (lower.startsWith("go to")) lower.removePrefix("go to").trim() else null
+        val trigger = goToTriggers
+            .filter { lower.contains(it) }
+            .maxByOrNull { it.length } ?: return null
+        val idx = lower.indexOf(trigger)
+        val afterTrigger = sentence.substring(idx + trigger.length)
+        val name = sanitizeName(afterTrigger)
+        return name.ifBlank { null }
     }
-
     private suspend fun extractLabel(sentence: String): String = withContext(Dispatchers.IO) {
         try {
             val body = JSONObject().apply {
@@ -197,8 +238,17 @@ class ConversationController(
                 onMotionCommand?.invoke("save_poi:$name")
                 continue
             }
-            extractGoToPoiName(userSentence)?.let { name ->
-                onMotionCommand?.invoke("goto_poi:$name")
+
+            extractGoToPoiName(userSentence)?.let { rawName ->
+                val match = knownPoiNames.firstOrNull { it.equals(rawName, ignoreCase = true) }
+                    ?: knownPoiNames.firstOrNull { it.contains(rawName, ignoreCase = true) || rawName.contains(it, ignoreCase = true) }
+                if (match != null) {
+                    onMotionCommand?.invoke("goto_poi:$match")
+                } else {
+                    val reply = "I don't know a place called $rawName. Try saying it differently."
+                    onRobotSpeech?.invoke(reply)
+                    sayMessage(reply)
+                }
                 continue
             }
 

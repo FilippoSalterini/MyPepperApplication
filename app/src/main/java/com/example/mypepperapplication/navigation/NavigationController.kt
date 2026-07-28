@@ -32,7 +32,36 @@ import kotlin.coroutines.resume
 import kotlin.math.atan2
 import java.io.File
 
-
+/**
+* Basata sull'architettura della repository https://github.com/softbankrobotics-labs/maplocalizeandmove.git
+* Il processo si fonda su un approccio di **Visual SLAM**, che combina le fotocamere stereo,
+* l'odometria delle ruote e i laser di sicurezza:
+*
+* 1. **Estrazione Feature**: Per ogni frame stereo, l'algoritmo individua i punti d'interesse (corner ad alto
+*    contrasto tra zone chiare e scure).
+*
+* 2. **Matching tra Frame**: Confronta le feature attuali con quelle dei frame precedenti per stimare lo
+*    spostamento del robot (visual odometry), integrando l'odometria dei motori.
+*
+* 3. **Triangolazione Stereo**: Calcola la posizione 3D delle feature nello spazio rispetto al robot sfruttando
+*    la vista dalle due fotocamere.
+*
+* 4. **Costruzione della Mappa**: Le feature confermate diventano *anchor point*, salvati sotto forma di
+*    descrittori matematici insieme alla loro posizione 3D rispetto al `MapFrame`.
+*
+* 5. **Loop Closure**: Riconosce i punti già mappati (es. durante il giro a 360° finale) per "chiudere l'anello"
+*    e correggere la deriva cumulativa.
+*
+* Responsabilità specifiche della classe:
+* - **Mappatura & Traiettoria**: Esegue `LocalizeAndMap` producendo un'oggetto [ExplorationMap] ed effettua
+*   il campionamento (sampling) periodico delle coordinate 2D del robot per tracciarne la traiettoria.
+* - **Gestione Punti di Interesse (PoI)**: Calcola, memorizza e ripristina i frame di riferimento (coordinate 2D)
+*   relativi al `MapFrame`, salvandoli su file JSON.
+* - **Rilocalizzazione & Movimento**: Rilocalizza il robot all'interno di una mappa salvata ed esegue i comandi
+*   di navigazione (`moveTo`), integrando logiche di retry e gestione degli ostacoli.
+* - **Persistenza & Esportazione**: Serializza e carica la mappa su file di testo ed estrae la rappresentazione
+*   grafica 2D sotto forma di [Bitmap].
+*/
 class NavigationController(private val qiContext: QiContext) {
     enum class GoToStatus { FAILED, CANCELLED, FINISHED }
     companion object { private const val TAG = "NavigationController" }
@@ -80,7 +109,7 @@ class NavigationController(private val qiContext: QiContext) {
         }
         poiStore.save(list)
     }
-
+    fun getPoiNames(): List<String> = poiFrames.keys.toList()
     // --- RUNTIME: rilocalizzazione + navigazione verso i PoI salvati ---
     suspend fun localize(): Boolean = withContext(Dispatchers.IO) {
         val map = explorationMap ?: return@withContext false
