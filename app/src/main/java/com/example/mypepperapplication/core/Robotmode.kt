@@ -4,5 +4,6 @@ enum class RobotMode {
     FOLLOW_HUMAN,   // Segue un umano (FollowHuman)
     VISUAL_SERVOING, // Segue/cerca un oggetto con YOLO (VisualServoingController)
     APPROACH_HUMAN,  // funzione per approcciare l'umano, implementata da follow_human limitando e togliendo il loop sul controllo
-    FIND_PERSON // trova persona nell ambiente
+    FIND_PERSON, // trova persona nell ambiente
+    EMERGENCY_STOPPED
 }

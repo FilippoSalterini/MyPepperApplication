@@ -79,7 +79,7 @@ class SentenceGenerator {
         )
     )
 
-    /**
+    /*
      * Load filler sentences from two separate files:
      * - filler_sentences_it-IT.txt for Italian
      * - filler_sentences_en-US.txt for English

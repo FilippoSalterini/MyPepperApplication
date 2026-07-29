@@ -17,27 +17,37 @@ import com.example.mypepperapplication.databinding.ActivityMainBinding
 import com.example.mypepperapplication.ui.UiController
 import com.example.mypepperapplication.vision.BoundingBox
 import com.aldebaran.qi.sdk.`object`.human.Human
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 // ================================================================
 // Main Activity
 // ================================================================
 
-/*
+/**
  * Entry point Android.
  * Responsabilità:
  *   1. Lifecycle Android + QiSDK
  *   2. Creazione di UiController e RobotManager
  *   3. Wiring UI → RobotManager tramite [bindUiToRobot]
  *   Resto : logica robot → RobotManager, logica UI → UiController.
+ *
+ *   CHIAMATE PER STOP E RESET
+ *   adb shell am broadcast -a com.example.mypepperapplication.EMERGENCY_STOP
+ *   adb shell am broadcast -a com.example.mypepperapplication.RESET_ESTOP
  */
 class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_AUDIO = 100
+        const val ACTION_EMERGENCY_STOP = "com.example.mypepperapplication.EMERGENCY_STOP"
+        const val ACTION_RESET_ESTOP = "com.example.mypepperapplication.RESET_ESTOP"
     }
     private lateinit var binding: ActivityMainBinding
     private lateinit var ui: UiController
     private lateinit var robotManager: RobotManager
-
+    private var emergencyStopReceiver: BroadcastReceiver? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -55,9 +65,12 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
                 REQUEST_AUDIO
             )
         }
+        registerEmergencyStopReceiver()
     }
 
     override fun onDestroy() {
+        emergencyStopReceiver?.let { unregisterReceiver(it) }
+        emergencyStopReceiver = null
         if (::robotManager.isInitialized) robotManager.stopAll()
         QiSDK.unregister(this, this)
         super.onDestroy()
@@ -107,7 +120,34 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         ui.onStopFindHuman = { robotManager.stopFindPerson() }
         ui.onTrackObject = { label -> robotManager.startVisualServoing(label) }
         ui.onStopTracking = { robotManager.stopVisualServoing() }
-
+        ui.onEmergencyStop = { robotManager.emergencyStop() }
+        ui.onResetEmergencyStop = { robotManager.resetEmergencyStop() }
+    }
+    private fun registerEmergencyStopReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (!::robotManager.isInitialized) {
+                    Log.w(TAG, "Broadcast ignored: robotManager not yet initialized")
+                    return
+                }
+                when (intent?.action) {
+                    ACTION_EMERGENCY_STOP -> {
+                        Log.w(TAG, "EMERGENCY STOP received via adb broadcast")
+                        robotManager.emergencyStop()
+                    }
+                    ACTION_RESET_ESTOP -> {
+                        Log.i(TAG, "RESET received via adb broadcast")
+                        robotManager.resetEmergencyStop()
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(ACTION_EMERGENCY_STOP)
+            addAction(ACTION_RESET_ESTOP)
+        }
+        ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        emergencyStopReceiver = receiver
     }
     private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
         override fun onModeChanged(mode: RobotMode)                   = ui { ui.updateForMode(mode) }

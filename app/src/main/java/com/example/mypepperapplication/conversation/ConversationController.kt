@@ -505,27 +505,6 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // TTS via QiSDK
     // ─────────────────────────────────────────────────────────────────────
-
-//    suspend fun sayMessage(text: String) = withContext(Dispatchers.IO) {
-//        try {
-//            isSpeaking = true
-//            val locale = if (language == "en-US")
-//                Locale(Language.ENGLISH, Region.UNITED_STATES)
-//            else
-//                Locale(Language.ITALIAN, Region.ITALY)
-//
-//            val phrase = Phrase("\\rspd=$voiceSpeed\\\\\\vct=$voicePitch\\\\$text")
-//            SayBuilder.with(qiContext)
-//                .withPhrase(phrase)
-//                .withLocale(locale)
-//                .build()
-//                .run()
-//        } catch (e: Exception) {
-//            Log.e(TAG, "sayMessage error: ${e.message}")
-//        } finally {
-//            isSpeaking = false
-//        }
-//    }
     suspend fun sayMessage(text: String, isActionFeedback: Boolean = false) = withContext(Dispatchers.IO) {
         if (isSpeaking) {
             if (isActionFeedback) {

@@ -14,4 +14,8 @@
     <string name="follow_human">Follow Human</string>
     <string name="track_object">Track Object</string>
     <string name="approach_human">Approach Human</string>
+    <string name="stop_symbol">■</string>
+    <string name="emergency_stop">Emergency stop — halts all robot actions immediately</string>
+    <string name="emergency_stopped_all_actions_halted">EMERGENCY STOPPED — all actions halted</string>
+    <string name="reset">RESET</string>
 </resources>

@@ -67,7 +67,9 @@ class NavigationController(private val qiContext: QiContext) {
     companion object { private const val TAG = "NavigationController" }
     private var explorationMap: ExplorationMap? = null
     private var currentLocalizeFuture: Future<Void>? = null
-
+    // Traccia il GoTo lanciato da goToWithRetry (moveTo), separato da currentLocalizeFuture
+    // che copre solo Localize/LocalizeAndMap. Serve per poterlo cancellare da emergencyStop().
+    @Volatile private var currentGoToFuture: Future<Void>? = null
     private val poiFrames = mutableMapOf<String, AttachedFrame>()
     private val poiStore = PoiStore(File(qiContext.filesDir, "pois.json"))
     private val trajectoryPoints = mutableListOf<Triple<Double, Double, Double>>() // x, y, theta
@@ -155,6 +157,18 @@ class NavigationController(private val qiContext: QiContext) {
         currentLocalizeFuture?.requestCancellation()
     }
 
+    fun stopMovement() {
+        try {
+            currentGoToFuture?.requestCancellation()
+        } catch (e: Exception) {
+            Log.w(TAG, "stopMovement: error cancelling GoTo: ${e.message}")
+        }
+        try {
+            currentLocalizeFuture?.requestCancellation()
+        } catch (e: Exception) {
+            Log.w(TAG, "stopMovement: error cancelling Localize: ${e.message}")
+        }
+    }
     // --- Persistenza mappa su file ---
 
     fun saveMapToFile(file: File) {
@@ -210,7 +224,9 @@ fun loadMapFromFile(file: File): Boolean {
                 .withMaxSpeed(speed)
                 .build()
             val future = goTo.async().run()
+            currentGoToFuture = future
             try { future.get() } catch (_: Exception) { }
+            if (currentGoToFuture == future) currentGoToFuture = null
             when {
                 future.isSuccess -> return@withContext GoToStatus.FINISHED
                 future.isCancelled -> return@withContext GoToStatus.CANCELLED

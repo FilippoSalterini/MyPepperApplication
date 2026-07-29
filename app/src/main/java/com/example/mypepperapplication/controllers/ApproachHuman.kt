@@ -30,7 +30,7 @@ class ApproachHuman(
 
     companion object {
         private const val TAG = "ApproachHuman"
-        const val SOCIAL_DISTANCE = 1.2          // ferma qui
+        const val SOCIAL_DISTANCE = 1.2 // ferma qui
         private const val POLL_INTERVAL_MS = 500L
         private const val HUMAN_SEARCH_TIMEOUT_MS = 5_000L
         private const val MAX_GOTO_ERRORS = 5

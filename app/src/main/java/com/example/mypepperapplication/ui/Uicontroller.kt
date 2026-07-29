@@ -27,6 +27,8 @@ class UiController(
     var onStopFindHuman:    (() -> Unit)? = null
     var onTrackObject:      ((String) -> Unit)? = null
     var onStopTracking:     (() -> Unit)? = null
+    var onEmergencyStop:    (() -> Unit)? = null
+    var onResetEmergencyStop: (() -> Unit)? = null
     val selectedLabel: String
         get() = binding.spinnerLabel.selectedItem as? String ?: searchableLabels.first()
 
@@ -73,18 +75,30 @@ class UiController(
             else
                 onTrackObject?.invoke(selectedLabel)
         }
+        binding.btnEmergencyStop.setOnClickListener {
+            onEmergencyStop?.invoke()
+        }
+        binding.btnResetEstop.setOnClickListener {
+            onResetEmergencyStop?.invoke()
+        }
     }
 
     // ── Mode ──────────────────────────────────────────────────────────────
 
     fun updateForMode(mode: RobotMode) {
         Log.d(TAG, "updateForMode: $mode")
-        // Reset tutto a IDLE come baseline
         binding.btnFollowHuman.text   = "Follow Human";   binding.btnFollowHuman.tag   = RobotMode.IDLE
         binding.btnApproachHuman.text = "Approach Human"; binding.btnApproachHuman.tag = RobotMode.IDLE
         binding.btnFindHuman.text     = "Find Human";     binding.btnFindHuman.tag     = RobotMode.IDLE
         binding.btnTrack.text         = "Track Object";   binding.btnTrack.tag         = RobotMode.IDLE
-        binding.spinnerLabel.isEnabled = true
+
+        val isEmergencyStopped = mode == RobotMode.EMERGENCY_STOPPED
+        binding.spinnerLabel.isEnabled     = !isEmergencyStopped
+        binding.btnFollowHuman.isEnabled   = !isEmergencyStopped
+        binding.btnApproachHuman.isEnabled = !isEmergencyStopped
+        binding.btnFindHuman.isEnabled     = !isEmergencyStopped
+        binding.btnTrack.isEnabled         = !isEmergencyStopped
+        binding.llEmergencyBanner.visibility = if (isEmergencyStopped) View.VISIBLE else View.GONE
 
         when (mode) {
             RobotMode.IDLE -> {
@@ -113,6 +127,9 @@ class UiController(
                 binding.btnTrack.tag  = RobotMode.VISUAL_SERVOING
                 binding.tvStatus.text = "Tracking — $selectedLabel"
                 binding.spinnerLabel.isEnabled = false
+            }
+            RobotMode.EMERGENCY_STOPPED -> {
+                binding.tvStatus.text = "EMERGENCY STOPPED"
             }
         }
     }

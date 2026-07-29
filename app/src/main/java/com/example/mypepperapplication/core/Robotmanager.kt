@@ -67,11 +67,16 @@ import java.io.FileOutputStream
  * - cmd /c "adb exec-out run-as com.example.mypepperapplication cat files/map_preview.png > map_preview.png"
  * - Format-Hex map_preview.png -Count 8
  *
+ * Per ricavare traiettoria e POI :
+ * - adb shell run-as com.example.mypepperapplication cat files/trajectory.json > trajectory.json
+ * - adb shell run-as com.example.mypepperapplication cat files/pois.json > pois.json
+ *
  * @property listener Interfaccia di callback [RobotManagerListener] per notificare gli eventi di stato all'UI/MainActivity.
  * @property context Il contesto Android dell'applicazione.
  * @property azureKey Chiave API per i servizi vocali/conversazionali Azure.
  * @property serverIp Indirizzo IP del server backend per l'elaborazione dei comandi o l'LLM.
  */
+
 class RobotManager(
     private val listener: RobotManagerListener? = null,
     private val context: Context,
@@ -404,6 +409,7 @@ class RobotManager(
                         findHuman = null
                     }
                     RobotMode.IDLE -> { }
+                    RobotMode.EMERGENCY_STOPPED -> { }
                 }
                 setMode(RobotMode.IDLE)
                 movementController.stopMovement()
@@ -415,6 +421,10 @@ class RobotManager(
     private suspend fun switchModeAsync(newMode: RobotMode): Boolean {
         val old = currentMode.get()
         if (old == newMode) { Log.w(TAG, "Already in $newMode"); return false }
+        if (old == RobotMode.EMERGENCY_STOPPED) {
+            Log.w(TAG, "Blocked: robot is EMERGENCY_STOPPED — call resetEmergencyStop() first")
+            return false
+        }
         when (old) {
             RobotMode.FOLLOW_HUMAN -> {
                 followHuman?.stop()
@@ -428,17 +438,55 @@ class RobotManager(
                 cleanStopServoing()
                 withContext(Dispatchers.Main) { listener?.onServoingStopped() }
             }
-
             RobotMode.FIND_PERSON -> {
                 findHuman?.stop()
                 findHuman = null
             }
             RobotMode.IDLE -> { }
+            RobotMode.EMERGENCY_STOPPED -> {
+                Log.w(TAG, "Blocked: robot is EMERGENCY_STOPPED — call resetEmergencyStop() first")
+                return false
+            }
         }
         setMode(newMode)
         return true
     }
+    // EMERGENCY STOP
+    fun emergencyStop() {
+        Log.w(TAG, "EMERGENCY STOP triggered")
+        movementController.stopMovement()
+        navigationController?.stopMovement()
+        managerScope.launch {
+            modeMutex.withLock {
+                unlockTimerTask?.cancel(); unlockTimerTask = null
+                followHuman?.stop();     followHuman = null
+                approachHuman?.stop();   approachHuman = null
+                findHuman?.stop();       findHuman = null
 
+                if (currentMode.get() == RobotMode.VISUAL_SERVOING) {
+                    withTimeoutOrNull(300L) { servoingController.stopTracking() }
+                    releaseForServoing()
+                }
+                lockedHuman = null
+                movementController.stopMovement()
+                navigationController?.stopMovement()
+                setMode(RobotMode.EMERGENCY_STOPPED)
+                withContext(Dispatchers.Main) { listener?.onServoingStopped() }
+                Log.w(TAG, "EMERGENCY STOP completed — robot locked, call resetEmergencyStop() to resume")
+            }
+        }
+    }
+
+    /* Sblocca il robot da EMERGENCY_STOPPED (classica funzionalità RESET e lo riporta in IDLE. */
+    fun resetEmergencyStop() {
+        managerScope.launch {
+            modeMutex.withLock {
+                if (currentMode.get() != RobotMode.EMERGENCY_STOPPED) return@withLock
+                setMode(RobotMode.IDLE)
+                Log.i(TAG, "Emergency stop reset — back to IDLE")
+            }
+        }
+    }
     private fun setMode(mode: RobotMode) {
         currentMode.set(mode)
         listener?.onModeChanged(mode)
@@ -540,7 +588,7 @@ class RobotManager(
                             managerScope.launch {
                                 modeMutex.withLock {
                                     findHuman = null
-                                    lastKnownPerson = human   // ← state tracking
+                                    lastKnownPerson = human
                                     setMode(RobotMode.IDLE)
                                     conversationController?.sayMessage("I found you! I can see you now.",isActionFeedback = true)
                                     withContext(Dispatchers.Main) { listener?.onPersonFound(human) }

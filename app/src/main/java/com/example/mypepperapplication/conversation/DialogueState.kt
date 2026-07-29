@@ -4,7 +4,7 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.collections.get
-/*
+/**
 * DialogueState.kt - il cuore dello stato conversazionale. Contiene:
 *
 * - dialogueSentence / prevDialogueSentence: lista di coppie [tipo, frase] — la risposta che il robot deve dire,
