@@ -24,7 +24,7 @@ The project combines **computer vision**, **robot navigation**, and **human-robo
 - 🚶 Autonomous Object Approach
 - 🤖 Real-Time Robot Control
 - 📱 Android User Interface
-
+- Navigation through POI
 ---
 
 ## 🚀 Features
@@ -60,6 +60,11 @@ The project combines **computer vision**, **robot navigation**, and **human-robo
 - Asynchronous movement execution
 - Safe stop and state recovery
 
+### Navigation 
+- Pepper camera stereo for scan scene detect
+- Laser for reconstruct map
+- Odometry for saving POI in the space
+- Stereo Triangulation using the 2-cameras it measure 3D feature of the environment with respect to the robot, and every feature "anchored" it became an anchor point saved as a math descriptor
 ---
 
 ## 🏗️ Architecture
@@ -220,8 +225,3 @@ Master's Degree in Robotics Engineering
 
 University of Genoa
 
----
-
-## 📄 License
-
-This project is released under the MIT License.
