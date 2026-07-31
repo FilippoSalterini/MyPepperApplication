@@ -18,4 +18,6 @@
     <string name="emergency_stop">Emergency stop — halts all robot actions immediately</string>
     <string name="emergency_stopped_all_actions_halted">EMERGENCY STOPPED — all actions halted</string>
     <string name="reset">RESET</string>
+    <string name="find">find</string>
+    <string name="approach">approach</string>
 </resources>

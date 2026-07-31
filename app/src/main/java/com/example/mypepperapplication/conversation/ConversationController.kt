@@ -90,16 +90,12 @@ class ConversationController(
 ) {
     private val dialogueState     = DialogueState() //cronologia conversazione
     private val sentenceGenerator = SentenceGenerator()
-
     private val saveTriggers = listOf("save", "remember this as", "call this")
-
     private val httpClient = OkHttpClient.Builder() //comunicazione con server python
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
-
     private var speechDetectionThreshold = 2000
-
     @Volatile var isRunning = false
         private set
     @Volatile private var isSpeaking = false
@@ -107,7 +103,6 @@ class ConversationController(
     private val bufferSize = 2 * AudioRecord.getMinBufferSize(
         SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
     )
-
     private fun sanitizeName(raw: String): String =
         raw.trim().trimEnd('.', ',', '!', '?', ';', ':').trim()
 
@@ -130,7 +125,6 @@ class ConversationController(
         CMD_STOP_MAP  to listOf("stop mapping", "finish mapping", "stop the mapping"),
         CMD_LOAD_MAP  to listOf("restore map", "load map", "load the map", "restore the map")
     )
-
     // Confirmation phrases Pepper says before executing the command
     private val motionReplies: Map<String, String> = mapOf(
         CMD_FOLLOW   to "Ok, I will follow you!",
@@ -138,22 +132,21 @@ class ConversationController(
         CMD_APPROACH to "Sure, coming closer!"
     )
     private val goToTriggers = listOf(
-        "go to", "take me to", "navigate to", "walk to", "head to", "can you go to"
+        "go to", "take me to", "navigate to", "walk to", "head to", "can you go to","back to"
     )
     // ── Exit keywords ─────────────────────────────────────────────────────
     private val exitPhrases = listOf("goodbye", "bye", "see you", "that's all")
-/*
-- isTrackIntent() serve per controllare se la frase contiene le keyword di ricerca
-- extractLabel() invece chiama /extract_label e ottiene il label YOLO della frase
- */
-    private val trackTriggers = listOf(
-        "find", "look for", "where is", "where are",
-        "search", "track", "locate", "get me"
-    )
+    /*
+    - isTrackIntent() serve per controllare se la frase contiene le keyword di ricerca
+    - extractLabel() invece chiama /extract_label e ottiene il label YOLO della frase
+     */
+    private val trackTriggers = listOf("find", "look for", "where is", "where are", "search", "track", "locate")
 
     private fun isTrackIntent(sentence: String): Boolean =
         trackTriggers.any { sentence.lowercase().contains(it) }
 
+    // Estrae il nome del POI da salvare identificando il trigger iniziale più lungo.
+    // Rimuove il prefisso trovato e restituisce il resto del testo pulito, oppure null se vuoto.
     private fun extractSavePoiName(sentence: String): String? {
         val lower = sentence.lowercase()
         val trigger = saveTriggers.filter { lower.startsWith("$it ") }.maxByOrNull { it.length } ?: return null
@@ -161,6 +154,8 @@ class ConversationController(
         return name.ifBlank { null }
     }
 
+    // Estrae il nome di un POI dalla frase individuando la parola chiave di avvio più lunga e poi isola
+    // il testo successivo al trigger, lo pulisce con `sanitizeName` e lo restituisce [se non vuoto].
     private fun extractGoToPoiName(sentence: String): String? {
         val lower = sentence.lowercase()
         val trigger = goToTriggers
@@ -171,6 +166,7 @@ class ConversationController(
         val name = sanitizeName(afterTrigger)
         return name.ifBlank { null }
     }
+    // comunica con il server per ottenere la label dell oggetto ed estrarla dalla frase
     private suspend fun extractLabel(sentence: String): String = withContext(Dispatchers.IO) {
         try {
             val body = JSONObject().apply {
@@ -193,7 +189,11 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Main loop
     // ─────────────────────────────────────────────────────────────────────
-
+    /**
+     * Gestisce il ciclo principale di conversazione: calibra l'audio, invia i saluti iniziali e processa
+     * in continuo l'input vocale per intercettare comandi locali (uscita, movimento, POI, tracking)
+     * prima di ricorrere al server per la risposta generica.
+     */
     suspend fun startConversationLoop() {
         isRunning = true
         Log.i(TAG, "Starting conversation loop")
@@ -285,15 +285,12 @@ class ConversationController(
     fun stop() {
         isRunning = false
     }
-
-    fun resetHistory() {
-        dialogueState.resetConversation()
-    }
-
     // ─────────────────────────────────────────────────────────────────────
     // Motion command matching
     // ─────────────────────────────────────────────────────────────────────
 
+    // cerca una sentence all interno di una mappa di comandi e le relative keywords, restituisce il comando
+    // associato alla parola chiave piu lunga che trova nela frase
     private fun matchMotionCommand(sentence: String): String? {
         val lower = sentence.lowercase()
         return motionCommands.entries
@@ -305,7 +302,14 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Threshold calibration
     // ─────────────────────────────────────────────────────────────────────
-
+    /**
+     * Calibra la soglia di rilevamento vocale (`speechDetectionThreshold`) misurando il rumore ambientale.
+     * 1. Verifica i permessi audio (`RECORD_AUDIO`).
+     * 2. Inizializza l'istanza `AudioRecord` e legge un singolo buffer di dati audio.
+     * 3. Calcola il picco massimo di ampiezza presente nel rumore di fondo (`bg`).
+     * 4. Imposta la nuova soglia sommando a questo valore un margine di offset (`THRESHOLD_ADJUSTMENT`).
+     * 5. Libera correttamente le risorse hardware dell'hardware audio nel blocco `finally`.
+     */
     private fun calibrateThreshold() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) return
@@ -331,18 +335,16 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Recording + Azure recognition
     // ─────────────────────────────────────────────────────────────────────
-    /*
-    Questa funziona svolge contemporanemante: registrazione audio, rilevazione quando
-    si sta parlando, l audio viene diviso in blocchi e ogni blocco viene trasmesso ad azure
-    RecognizeChunk restituisce il testo riconosciuto -> il codcie salva tmp il blocco audio
-    in un file WAV (writewavfile()) siccome speechrecognizer viene configurato per leggere
-    da un file WAV e poi crea :
-    SpeechConfig
-    AudioConfig
-    SpeechRecognizer
-    ed invoca recognizeOnceAsync() -> se il ricosnoscimento funziona recognizedSpeech restituisce
-    il testo, se invece non trova corrispondenze o l operazione viene annullata, registra un messaggio
-    di LOG -> alla fine chiude tutte le risorse e cancella il file tmp.
+    /**
+     * Registra l'audio dal microfono, rileva il parlato tramite soglia di ampiezza e trascrive il testo in modo asincrono.
+     * 1. Configura `AudioRecord` e abilita il soppressore di rumore hardware (`NoiseSuppressor`), se disponibile sul dispositivo.
+     * 2. Monitora in continuo l'ampiezza dell'audio; se supera `speechDetectionThreshold`, accumula i byte nello stream.
+     * 3. Se il robot sta parlando (`isSpeaking`), resetta il buffer per evitare di ascoltare la propria voce (echo suppression).
+     * 4. Gestisce il parlato a blocchi (chunking): dopo una pausa breve (`SHORT_SILENCE_MS`), invia il blocco accumulato a `recognizeChunk`
+     *    lanciando una coroutine parallela per non interrompere la registrazione.
+     * 5. Termina la registrazione al superamento di un silenzio prolungato (`LONG_SILENCE_MS`) o del timeout iniziale (`INITIAL_TIMEOUT_MS`).
+     * 6. Nel blocco `finally` rilascia le risorse audio hardware, ricompone tutti i frammenti trascritti ordinandoli per indice
+     *    e restituisce la frase completa formattata.
      */
     private suspend fun listenAndRecognize(): String = withContext(Dispatchers.IO) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
@@ -419,7 +421,16 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Single chunk recognition via Azure
     // ─────────────────────────────────────────────────────────────────────
-
+    /**
+     * Converte un array di byte audio in testo tramite il servizio Microsoft Azure Speech Recognition.
+     * 1. Salva temporaneamente i byte audio ricevuti come file WAV nella cache dell'app (`context.cacheDir`).
+     * 2. Inizializza il client Azure Speech SDK (`SpeechConfig`, `AudioConfig`, `SpeechRecognizer`) impostando la lingua ("en-US")
+     *    e disabilitando i controlli CRL di OpenSSL per evitare problemi di certificati HTTPS/TLS.
+     * 3. Esegue la trascrizione sincrona del singolo frammento audio tramite `recognizeOnceAsync().get()`.
+     * 4. Gestisce l'esito della richiesta (riconoscimento riuscito, nessun match o errore/cancellazione).
+     * 5. Libera le risorse dell'SDK e cancella il file WAV temporaneo in un thread separato nel blocco `finally`
+     *    per evitare di bloccare il thread chiamante durante la pulizia.
+     */
     private fun recognizeChunk(audioBytes: ByteArray): String {
         if (audioBytes.isEmpty()) return ""
 
@@ -463,7 +474,7 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // LLM request
     // ─────────────────────────────────────────────────────────────────────
-    /*
+    /**
     funzione chatRequest che serve per comnicare con il server LLM, crea un file
     JSON contenente il messaggio corrente e lo storico della cvorsazione
     --> invia una richuiesta HTTP POST all endpoint chat del server python, se server
@@ -539,7 +550,13 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // Audio utilities
     // ─────────────────────────────────────────────────────────────────────
-
+    /**
+     * Converte un array di campioni audio a 16-bit (`ShortArray`) in un array di byte (`ByteArray`) in formato Little-Endian.
+     *
+     * Nello specifico:
+     * Alloca un array di dimensione doppia (ogni Short richiede 2 byte) ed estrae il byte meno significativo (LSB)
+     * e quello più significativo (MSB) tramite operazioni bitwise (`and 0x00FF` e shift a destra `shr 8`).
+     */
     private fun shortsToBytes(sData: ShortArray): ByteArray {
         val bytes = ByteArray(sData.size * 2)
         for (i in sData.indices) {
@@ -548,7 +565,13 @@ class ConversationController(
         }
         return bytes
     }
-
+    /**
+     * Incapsula i dati PCM raw di un array di byte (`audioBytes`) all'interno di un file formattato WAV RIFF a 16-bit mono.
+     * 1. Apre uno stream di scrittura (`FileOutputStream`) gestito tramite `use` per la chiusura automatica delle risorse.
+     * 2. Scrive l'intestazione standard di 44 byte dell'header RIFF/WAVE (chunk `fmt` a 16 bit PCM mono e chunk `data`).
+     * 3. Calcola dinamica il valore di `byteRate` in base al `SAMPLE_RATE` e aggiorna le dimensioni del file e dei blocchi audio.
+     * 4. Scrivi infine i byte audio grezzi (`audioBytes`) in coda all'header.
+     */
     private fun writeWavFile(audioBytes: ByteArray, file: File) {
         try {
             FileOutputStream(file).use { fos ->
@@ -573,10 +596,14 @@ class ConversationController(
         }
     }
 
+    // Converte un intero a 32-bit (`Int`) in un array di 4 byte disposti in ordine Little-Endian
+    // (byte meno significativo viene inserito in fondo nella memoria)
     private fun intToBytes(v: Int) = byteArrayOf(
         v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte()
     )
 
+    // converte un valore intero rappresentante uno Short (16-bit) in un
+    // array di 2 byte in ordine Little-Endian.
     private fun shortToBytes(v: Int) = byteArrayOf(
         v.toByte(), (v shr 8).toByte()
     )

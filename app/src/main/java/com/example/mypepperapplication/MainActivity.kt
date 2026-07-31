@@ -24,7 +24,6 @@ import android.content.IntentFilter
 // ================================================================
 // Main Activity
 // ================================================================
-
 /**
  * Entry point Android.
  * Responsabilità:

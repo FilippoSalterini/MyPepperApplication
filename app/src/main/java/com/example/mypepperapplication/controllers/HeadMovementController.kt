@@ -8,6 +8,7 @@ import com.aldebaran.qi.sdk.builder.LookAtBuilder
 import com.aldebaran.qi.sdk.`object`.actuation.FreeFrame
 import com.aldebaran.qi.sdk.`object`.actuation.LookAtMovementPolicy
 import kotlinx.coroutines.delay
+import java.util.concurrent.atomic.AtomicBoolean
 
 // ===========================================================================
 // HEAD MOVEMENT CONTROLLER
@@ -20,15 +21,17 @@ class HeadMovementController {
     private var qiContext: QiContext? = null
     private var currentLookAtFuture: Future<Void>? = null
     private var gazeFreeFrame: FreeFrame? = null
+    private val isTearingDown = AtomicBoolean(false)
 
     fun onRobotReady(ctx: QiContext) {
+        isTearingDown.set(false)
         qiContext = ctx
         Log.d(TAG, "HeadController ready.")
     }
-
-    // Nota: onRobotLost non può essere suspend direttamente perché è una callback nativa,
+    // Nota-> onRobotLost non può essere suspend direttamente perché è una callback nativa,
     // ma esegue un cleanup rapido azzerando i riferimenti.
     fun onRobotLost() {
+        isTearingDown.set(true)
         try {
             currentLookAtFuture?.requestCancellation()
         } catch (_: Exception) {}
@@ -59,7 +62,6 @@ class HeadMovementController {
 
         TransformBuilder.create().from2DTransform(forward, lateral, 0.0)
     }
-
     /**
      * Aggiorna lo sguardo del robot. Rimane una funzione normale (non-suspend)
      * perché l'aggiornamento del FreeFrame o l'avvio asincrono del LookAt non sono bloccanti.
@@ -69,6 +71,12 @@ class HeadMovementController {
         normErrY: Float = 0f,
         scanMode: Boolean = false
     ) {
+        //se è in corso un teardown (onRobotLost), non proseguire.
+        if (isTearingDown.get()) {
+            Log.d(TAG, "setGaze skipped — tearing down")
+            return
+        }
+
         val ctx = qiContext ?: return
         val transform = buildGazeTransform(normErrX, normErrY, scanMode)
         val robotFrame = ctx.actuation.robotFrame()
@@ -78,6 +86,13 @@ class HeadMovementController {
             try {
                 val newFrame = ctx.mapping.makeFreeFrame()
                 newFrame.update(robotFrame, transform, System.currentTimeMillis())
+                // ricontrolla subito prima di pubblicare lo stato,
+                // nel caso onRobotLost() sia arrivato durante makeFreeFrame()/update().
+                if (isTearingDown.get()) {
+                    Log.d(TAG, "setGaze aborted mid-creation — tearing down")
+                    return
+                }
+
                 gazeFreeFrame = newFrame
 
                 val lookAt = LookAtBuilder.with(ctx)
@@ -88,10 +103,11 @@ class HeadMovementController {
                 currentLookAtFuture = lookAt.async().run() as Future<Void>
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting new LookAt: ${e.message}")
+                gazeFreeFrame = null
+                currentLookAtFuture = null
             }
         } else {
             try {
-                // Aggiornamento fluido del frame esistente senza ricreare il LookAt nativo
                 localFrame.update(robotFrame, transform, System.currentTimeMillis())
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating FreeFrame: ${e.message}")
@@ -141,19 +157,22 @@ class HeadMovementController {
             try {
                 val newFrame = ctx.mapping.makeFreeFrame()
                 newFrame.update(robotFrame, forward, System.currentTimeMillis())
+                if (isTearingDown.get()) {
+                    Log.d(TAG, "resetHead aborted mid-creation — tearing down")
+                    return
+                }
                 gazeFreeFrame = newFrame
-
                 val lookAt = LookAtBuilder.with(ctx).withFrame(newFrame.frame()).build()
                 lookAt.policy = LookAtMovementPolicy.HEAD_ONLY
                 currentLookAtFuture = lookAt.async().run() as Future<Void>
-
                 Log.d(TAG, "Head reset → forward (new LookAt)")
             } catch (e: Exception) {
                 Log.w(TAG, "resetHead new LookAt failed: ${e.message}")
+                gazeFreeFrame = null
+                currentLookAtFuture = null
             }
         }
     }
-
     private fun clampLateral(v: Float) =
         if (v < -1.5f) -1.5f else if (v > 1.5f) 1.5f else v
 }

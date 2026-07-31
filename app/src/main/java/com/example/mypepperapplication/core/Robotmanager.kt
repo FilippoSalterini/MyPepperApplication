@@ -649,6 +649,10 @@ class RobotManager(
                         modeMutex.withLock {
                             if (mappingJob?.isActive == true) { Log.w(TAG, "Mapping already running"); return@withLock }
                             holdForServoing()
+                            conversationController?.sayMessage(
+                                "Please stay away from me, I'm about to start mapping.",
+                                isActionFeedback = true
+                            )
                             mappingJob = managerScope.launch { navigationController?.localizeAndMap(false, managerScope) }                        }
                     }
                     cmd == CMD_STOP_MAP -> managerScope.launch {
