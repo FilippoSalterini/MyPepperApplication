@@ -120,7 +120,7 @@ class VisualServoingController(
                 delay(scanDelayMs)
 
                 val bmp = captureFrame(cameraController)
-                val hit = runDetection(detectionController, bmp).bestMatch(labels)
+                val hit = if (bmp != null) runDetection(detectionController, bmp).bestMatch(labels) else null
 
                 if (hit != null) {
                     Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx")
@@ -161,7 +161,7 @@ class VisualServoingController(
 
             while (isActive) {
                 val bitmap = captureFrame(cameraController)
-                val target = runDetection(detectionController, bitmap).bestMatch(labels)
+                val target = if (bitmap != null) runDetection(detectionController, bitmap).bestMatch(labels) else null
 
                 if (target == null) {
                     missedFrames++
@@ -286,16 +286,17 @@ class VisualServoingController(
             while (isActive) {
                 delay(300L)
                 val bitmap = captureFrame(cameraController)
-
-                val target = runDetection(detectionController, bitmap)
-                    .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
-                    .let { boxes ->
-                        if (lastArea > 0f && boxes.size > 1) {
-                            boxes.minByOrNull { abs(it.rect.width() * it.rect.height() - lastArea) }
-                        } else {
-                            boxes.maxByOrNull { it.score }
+                val target = if (bitmap != null) {
+                    runDetection(detectionController, bitmap)
+                        .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
+                        .let { boxes ->
+                            if (lastArea > 0f && boxes.size > 1) {
+                                boxes.minByOrNull { abs(it.rect.width() * it.rect.height() - lastArea) }
+                            } else {
+                                boxes.maxByOrNull { it.score }
+                            }
                         }
-                    }
+                } else null
 
                 if (target == null) {
                     missedFrames++
@@ -430,7 +431,7 @@ class VisualServoingController(
         Log.i(TAG, "Visual servoing tracking loop stopped completely.")
     }
 
-    private suspend fun captureFrame(cam: PepperCameraController): Bitmap =
+    private suspend fun captureFrame(cam: PepperCameraController): Bitmap? =
         suspendCancellableCoroutine { cont ->
             cam.takeSinglePicture { bmp, _ -> if (cont.isActive) cont.resume(bmp) }
         }

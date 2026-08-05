@@ -77,7 +77,7 @@ const val CMD_APPROACH = "approach"
 const val CMD_START_MAP = "start_map"
 const val CMD_STOP_MAP  = "stop_map"
 const val CMD_LOAD_MAP  = "load_map"
-
+const val CMD_FIND_PERSON = "find_person"
 class ConversationController(
     private val context: Context,
     private val qiContext: QiContext,
@@ -255,7 +255,15 @@ class ConversationController(
             // 3. Track object intent
             if (isTrackIntent(userSentence)) {
                 val label = extractLabel(userSentence)
-                if (label != "none") {
+                if (label == "person") {
+                    // "trova una persona/l'umano" → usa FindPersonController, più rapido e affidabile
+                    // del visual servoing YOLO per un target generico come "person"
+                    val reply = "Ok, I'll look for you!"
+                    onRobotSpeech?.invoke(reply)
+                    sayMessage(reply)
+                    onMotionCommand?.invoke("find_person")
+                    continue
+                } else if (label != "none") {
                     val reply = "Ok, I'll look for the $label!"
                     onRobotSpeech?.invoke(reply)
                     sayMessage(reply)

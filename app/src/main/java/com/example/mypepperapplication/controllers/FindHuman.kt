@@ -73,11 +73,10 @@ class FindHuman(
         return try {
             val humans = qiContext.humanAwareness
                 .async().humansAround
-                .get() ?: return null
+                .get(2, java.util.concurrent.TimeUnit.SECONDS) ?: return null
 
             if (humans.isEmpty()) return null
 
-            // Restituisce la persona più vicina
             val rFrame = qiContext.actuation.robotFrame()
             humans.minByOrNull { human ->
                 try {
@@ -86,6 +85,9 @@ class FindHuman(
                     sqrt(t.x * t.x + t.y * t.y)
                 } catch (_: Exception) { Double.MAX_VALUE }
             }
+        } catch (_: java.util.concurrent.TimeoutException) {
+            Log.w(TAG, "humansAround timed out")
+            null
         } catch (e: Exception) {
             Log.w(TAG, "HumanAwareness error: ${e.message}")
             null

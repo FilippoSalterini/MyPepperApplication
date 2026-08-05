@@ -27,8 +27,8 @@ class PepperCameraController {
     private val captureInProgress = AtomicBoolean(false)
 
     fun interface FrameCallback {
-        /** Chiamato su thread IO ogni volta che un nuovo frame è disponibile. */
-        fun onFrame(bitmap: Bitmap, timestampMs: Long)
+        /** Chiamato SEMPRE, su thread IO. bitmap è null se la cattura è fallita per qualunque motivo. */
+        fun onFrame(bitmap: Bitmap?, timestampMs: Long)
     }
 
     private var qiContext: QiContext? = null
@@ -41,14 +41,16 @@ class PepperCameraController {
         qiContext = null
         Log.d(TAG, "Camera controller released.")
     }
-    //API pubblica
+
     fun takeSinglePicture(callback: FrameCallback) {
         val ctx = qiContext ?: run {
             Log.e(TAG, "takeSinglePicture: qiContext null — robot not connected?")
+            callback.onFrame(null, System.currentTimeMillis())
             return
         }
         if (!captureInProgress.compareAndSet(false, true)) {
             Log.d(TAG, "Capture skipped: previous still running")
+            callback.onFrame(null, System.currentTimeMillis())
             return
         }
 
@@ -62,6 +64,7 @@ class PepperCameraController {
                     Log.d(TAG, "Frame captured: ${bitmap.width}×${bitmap.height}")
                 } else {
                     Log.e(TAG, "Frame decode failed")
+                    callback.onFrame(null, System.currentTimeMillis())
                 }
             } catch (e: Exception) {
                 if (e.message?.contains("video device") == true) {
@@ -71,18 +74,22 @@ class PepperCameraController {
                         val takePicture2 = TakePictureBuilder.with(ctx).build()
                         val img = takePicture2.async().run().get()
                         val bitmap = img.toBitmap()
-                        if (bitmap != null) callback.onFrame(bitmap, System.currentTimeMillis())
+                        callback.onFrame(bitmap, System.currentTimeMillis())
+                        if (bitmap == null) Log.e(TAG, "Retry decode failed")
                     } catch (e2: Exception) {
                         Log.e(TAG, "Retry failed: ${e2.message}")
+                        callback.onFrame(null, System.currentTimeMillis())
                     }
                 } else {
                     Log.e(TAG, "takeSinglePicture error: ${e.message}", e)
+                    callback.onFrame(null, System.currentTimeMillis())
                 }
             } finally {
                 captureInProgress.set(false)
             }
         }
     }
+
     private fun TimestampedImageHandle.toBitmap(): Bitmap? {
         return try {
             val image = this.image.value

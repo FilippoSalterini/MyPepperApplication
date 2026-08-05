@@ -23,6 +23,7 @@ import com.example.mypepperapplication.conversation.CMD_LOAD_MAP
 import com.example.mypepperapplication.conversation.CMD_FOLLOW
 import com.example.mypepperapplication.conversation.CMD_STOP
 import com.example.mypepperapplication.conversation.CMD_APPROACH
+import com.example.mypepperapplication.conversation.CMD_FIND_PERSON
 import com.example.mypepperapplication.navigation.NavigationController
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -641,6 +642,7 @@ class RobotManager(
                     cmd == CMD_FOLLOW   -> startFollowHumanAutoDetect()
                     cmd == CMD_STOP     -> stopAll()
                     cmd == CMD_APPROACH -> startApproachHuman()
+                    cmd == CMD_FIND_PERSON -> startFindPerson()
                     cmd.startsWith("track:") -> {
                         val label = cmd.removePrefix("track:")
                         startVisualServoing(label)
