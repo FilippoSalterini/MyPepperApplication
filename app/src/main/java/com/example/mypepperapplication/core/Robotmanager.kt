@@ -92,8 +92,15 @@ class RobotManager(
         fun onDistanceChanged(meters: Double)
         fun onServoingStarted(labels: List<String>)
         fun onServoingStopped()
-        fun onObjectReached(label: String, box: BoundingBox)
+        /** Invocata quando il target del servoing è stato centrato (PHASE 1). Nessun approccio fisico avviene più. */
+        fun onObjectCentered(label: String, box: BoundingBox)
         fun onObjectLost(labels: List<String>)
+        /**
+         * Invocata a fine SCAN con tutti gli oggetti visti durante la rotazione a 360°,
+         * associati implicitamente al PoI/stanza corrente (nota: l'associazione esplicita
+         * a WorldStateManager non è ancora implementata — vedi TODO in memoria).
+         */
+        fun onObjectsSpotted(spotted: List<BoundingBox>)
         fun onChargingFlapOpen()
         fun onPersonFound(human: Human)
         fun onPersonNotFound()
@@ -134,14 +141,14 @@ class RobotManager(
     val mode: RobotMode get() = currentMode.get()
     private val servoingController = VisualServoingController(movementController, headController).also {
         it.listener = object : VisualServoingController.VisualServoingListener {
-            override fun onObjectReached(label: String, box: BoundingBox) {
-                Log.i(TAG, "Object reached: $label")
+            override fun onObjectCentered(label: String, box: BoundingBox) {
+                Log.i(TAG, "Object centered: $label")
                 managerScope.launch {
                     modeMutex.withLock {
                         cleanStopServoing()
                     }
                     conversationController?.sayMessage("I found the $label!", isActionFeedback = true)
-                    withContext(Dispatchers.Main) { listener?.onObjectReached(label, box) }
+                    withContext(Dispatchers.Main) { listener?.onObjectCentered(label, box) }
                 }
             }
             override fun onObjectLost(labels: List<String>) {
@@ -156,6 +163,14 @@ class RobotManager(
                             listener?.onServoingStopped()
                         }
                     }
+                }
+            }
+            override fun onObjectsSpotted(spotted: List<BoundingBox>) {
+                Log.i(TAG, "Objects spotted during scan: ${spotted.map { it.label }}")
+                // NOTA: qui in futuro andrà l'inoltro a WorldStateManager (label + PoI corrente).
+                // Per ora si limita a propagare l'evento verso l'UI/listener esterno.
+                managerScope.launch {
+                    withContext(Dispatchers.Main) { listener?.onObjectsSpotted(spotted) }
                 }
             }
         }
@@ -325,13 +340,13 @@ class RobotManager(
                     followHumanListener = object : FollowHuman.FollowHumanListener {
                         override fun onFollowingHuman()                  { listener?.onFollowingHuman() }
                         override fun onCloseEnough()                     { listener?.onCloseEnoughToHuman()
-                        managerScope.launch { conversationController?.sayMessage("I'm close enough!") }
+                            managerScope.launch { conversationController?.sayMessage("I'm close enough!") }
                         }
                         override fun onCantReachHuman()                  { listener?.onCantReachHuman()
-                        managerScope.launch { conversationController?.sayMessage("I'm having trouble reaching you!") }
+                            managerScope.launch { conversationController?.sayMessage("I'm having trouble reaching you!") }
                         }
                         override fun onChargingFlapOpen()                { listener?.onChargingFlapOpen()
-                        managerScope.launch { conversationController?.sayMessage("I can't move, my charging flap is open!") }
+                            managerScope.launch { conversationController?.sayMessage("I can't move, my charging flap is open!") }
                         }
                         override fun onDistanceToHumanChanged(distance: Double) { listener?.onDistanceChanged(distance) }
                     }

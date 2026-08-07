@@ -11,8 +11,9 @@ import kotlin.math.abs
 // ===========================================================================
 // VISUAL SERVOING CONTROLLER
 // ===========================================================================
-/*
-Azione strutturata in più fasi per scanning, detecting e approaching object nell ambiente
+/**
+*Azione strutturata in due fasi: scanning (SCAN 360°, con accumulo di tutti gli oggetti
+*visti oltre al target) e centraggio di precisione (PHASE 1)
  */
 private const val TAG = "VisualServoing"
 
@@ -22,18 +23,17 @@ class VisualServoingController(
 ) {
 
     interface VisualServoingListener {
-        fun onObjectReached(label: String, box: BoundingBox)
+        fun onObjectCentered(label: String, box: BoundingBox)
         fun onObjectLost(labels: List<String>)
+        fun onObjectsSpotted(spotted: List<BoundingBox>)
     }
 
     // Parametri di controllo
-    var targetArea:       Float  = 0.018f  // 0.035f
     var kpRotation:       Float  = 0.8f
     var maxRotationStep:  Float  = 0.35f
     var bodyRotationZone: Float  = 0.12f
     var headOnlyZone:     Float  = 0.05f
     var lpfAlpha:         Float  = 0.5f
-    var maxMissedFrames:  Int    = 10
     var maxMissedFramesApproach: Int = 7
     var cycleDelayMs:     Long   = 250L
 
@@ -58,11 +58,6 @@ class VisualServoingController(
      */
     var scanStepRad:      Double = 0.25
     var scanSteps:        Int    = 14
-    private val approachCorrectionZone = 0.30f // era 0.25
-
-    // Stall detector
-    private val stallThreshold = 0.003f
-    private val stallMaxFrames = 8
     var scanDelayMs : Long   = 300L
 
     var listener : VisualServoingListener? = null
@@ -102,6 +97,10 @@ class VisualServoingController(
                 repeat(halfSteps) { add(-scanStepRad + (Math.random() * 0.04 - 0.02)) }
             }
 
+            // Accumulo di TUTTI gli oggetti visti durante lo scan, non solo il target.
+            // Dedup per label: si tiene solo la detection con score più alto vista finora.
+            val spottedByLabel = mutableMapOf<String, BoundingBox>()
+
             var found = false
             for ((idx, angle) in angles.withIndex()) {
                 if (!isActive || found) break
@@ -120,7 +119,18 @@ class VisualServoingController(
                 delay(scanDelayMs)
 
                 val bmp = captureFrame(cameraController)
-                val hit = if (bmp != null) runDetection(detectionController, bmp).bestMatch(labels) else null
+                val boxesThisFrame = if (bmp != null) runDetection(detectionController, bmp) else emptyList()
+
+                // Accumula ogni detection di questo frame (indipendentemente dal target),
+                // tenendo per ciascuna label lo score più alto osservato finora.
+                for (box in boxesThisFrame) {
+                    val existing = spottedByLabel[box.label]
+                    if (existing == null || box.score > existing.score) {
+                        spottedByLabel[box.label] = box
+                    }
+                }
+
+                val hit = boxesThisFrame.bestMatch(labels)
 
                 if (hit != null) {
                     Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx")
@@ -129,6 +139,11 @@ class VisualServoingController(
                     headController.setGaze(normErrX = hit.cx - 0.5f, normErrY = hit.cy - 0.5f)
                     found = true
                 }
+            }
+
+            if (spottedByLabel.isNotEmpty()) {
+                Log.i(TAG, "SCAN spotted ${spottedByLabel.size} distinct label(s): ${spottedByLabel.keys}")
+                listener?.onObjectsSpotted(spottedByLabel.values.toList())
             }
 
             if (!found) {
@@ -147,11 +162,13 @@ class VisualServoingController(
             - utilizzo di un LPF che serve per atteuare il jitter della bb di yolo,
             permettendo ai comandi inviati alla testa di essere morbidi
              */
+
             var rotateStallCount = 0
             var lastRawErrX      = 0f
             var nearZoneFrames   = 0
             val nearZoneRequired = 4
             var missedFrames     = 0
+            var lastCenteredTarget: BoundingBox? = null
             centeredFrames       = 0
             smoothErrX           = 0f
             smoothErrY           = 0f
@@ -175,6 +192,7 @@ class VisualServoingController(
                     continue
                 }
                 missedFrames = 0
+                lastCenteredTarget = target
 
                 val rawErrX = target.cx - 0.5f
                 val rawErrY = target.cy - 0.5f
@@ -204,7 +222,7 @@ class VisualServoingController(
                         if (abs(rawErrX - lastRawErrX) < 0.01f) {
                             rotateStallCount++
                             if (rotateStallCount >= 4) {
-                                Log.w(TAG, "ROTATE STALL MAX — forcing PHASE 2")
+                                Log.w(TAG, "ROTATE STALL MAX — exiting centering loop early")
                                 headController.stopGaze()
                                 delay(200L)
                                 break
@@ -262,150 +280,18 @@ class VisualServoingController(
             }
             if (!isActive) return@launch
 
-            // ── FASE 2: APPROCCIO CONTINUO BILANCIATO ─────────────────────────
-            /*
-            Fase da fixare per quanto riguarda la gestione degli errori per l approccio
-            continuo
-             */
-            Log.i(TAG, "PHASE 2 — continuous approach")
-            missedFrames = 0
-            var stallFrames = 0
-            var lastArea    = 0f
-            var slowApproachStarted = false
+            // ── (PHASE 2) target centrato ─────────────
+            //lastCenteredTarget è aggiornato ad ogni iterazione di PHASE 1 — nessuno scatto extra necessario.
+            headController.resetHead()
 
-            //inizio fix
-            smoothErrX = 0f
-            smoothErrY = 0f
-            headController.setGaze(normErrX = 0f, normErrY = 0f)
-            //fine fix
+            if (lastCenteredTarget != null) {
+                Log.i(TAG, "PHASE 1 result — object centered: ${lastCenteredTarget.label}")
+                listener?.onObjectCentered(lastCenteredTarget.label, lastCenteredTarget)
+            } else {
+                Log.w(TAG, "PHASE 1 ended without a confirmed target")
+                listener?.onObjectLost(labels)
+            }
 
-            //headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
-            movementController.moveTowardAsync(distanceMeters = 1.5)
-            delay(400L)
-
-            while (isActive) {
-                delay(300L)
-                val bitmap = captureFrame(cameraController)
-                val target = if (bitmap != null) {
-                    runDetection(detectionController, bitmap)
-                        .filter { box -> labels.any { it.equals(box.label, ignoreCase = true) } }
-                        .let { boxes ->
-                            if (lastArea > 0f && boxes.size > 1) {
-                                boxes.minByOrNull { abs(it.rect.width() * it.rect.height() - lastArea) }
-                            } else {
-                                boxes.maxByOrNull { it.score }
-                            }
-                        }
-                } else null
-
-                if (target == null) {
-                    missedFrames++
-                    if (missedFrames >= maxMissedFrames) {
-                        movementController.stopMovement()
-                        headController.resetHead()
-                        listener?.onObjectLost(labels)
-                        return@launch
-                    }
-                    continue
-                }
-                missedFrames = 0
-
-                val rawErrX = target.cx - 0.5f
-                val rawErrY = target.cy - 0.5f
-
-                val approachAlpha = 0.7f
-                smoothErrX = approachAlpha * rawErrX + (1f - approachAlpha) * smoothErrX
-                smoothErrY = approachAlpha * rawErrY + (1f - approachAlpha) * smoothErrY
-
-                headController.setGaze(normErrX = smoothErrX, normErrY = smoothErrY)
-
-                val area = target.rect.width() * target.rect.height()
-                Log.d(TAG, "APPROACH [${target.label}] area=%.4f target=%.4f rawErrX=%.3f".format(area, targetArea, rawErrX))
-
-                if (abs(smoothErrX) > approachCorrectionZone) {
-                    Log.i(TAG, "APPROACH correction rotate rawErrX=%.3f. Stopping layout engines...".format(rawErrX))
-
-                    movementController.stopMovement()
-
-                    headController.stopGaze()
-                    delay(400L)
-
-                    val theta = (-kpRotation * rawErrX).coerceIn(-maxRotationStep, maxRotationStep).toDouble()
-                    // retry in caso di "Move task not started"
-                    var rotated = false
-                    repeat(2) {
-                        if (!rotated) {
-                            try {
-                                movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
-                                rotated = true
-                            } catch (e: Exception) {
-                                Log.w(TAG, "rotateAwait failed, retrying after delay: ${e.message}")
-                                delay(300L)
-                            }
-                        }
-                    }
-                    smoothErrX = 0f
-                    smoothErrY = 0f
-
-                    val estimatedRemainingDistance = ((targetArea / area.coerceAtLeast(0.001f)) * 0.5f).coerceIn(0.4f, 1.5f).toDouble()
-                    Log.i(TAG, "Resuming progressive translation: %.2fm".format(estimatedRemainingDistance))
-
-                    movementController.moveTowardAsync(distanceMeters = estimatedRemainingDistance)
-                    delay(500L)
-                    continue
-                }
-
-                // Stall detector
-                if (abs(area - lastArea) < stallThreshold) stallFrames++ else stallFrames = 0
-                lastArea = area
-
-                if (stallFrames > stallMaxFrames) {
-                    Log.i(TAG, "APPROACH STALL — target reached by proximity (rawErrX=%.3f)".format(rawErrX))
-                    movementController.stopMovement()
-                    delay(400L)
-
-                    if (abs(rawErrX) > 0.08f) {
-                        val theta = (-kpRotation * rawErrX * 0.5f).coerceIn(-0.15f, 0.15f).toDouble()
-                        try {
-                            headController.stopGaze()
-                            delay(150L)
-                            movementController.rotateAwait(theta = theta, maxSpeed = 0.2f)
-                        } catch (e: Exception) { Log.e(TAG, "Error during stall alignment: ${e.message}") }
-                    }
-
-                    headController.resetHead()
-                    listener?.onObjectReached(target.label, target)
-                    return@launch
-                }
-                // Rallentamento pre-arrivo
-                if (!slowApproachStarted && area >= targetArea * 0.60f && area < targetArea) {
-                    slowApproachStarted = true
-                    movementController.stopMovement()
-                    delay(1300L)
-                    movementController.moveTowardAsync(distanceMeters = 0.15)
-                    continue
-                }
-
-                // Stop finale
-                if (area >= targetArea) {
-                    Log.i(TAG, "APPROACH DONE — area=%.4f >= target=%.4f".format(area, targetArea))
-                    movementController.stopMovement()
-                    delay(500L)
-
-                    if (abs(rawErrX) > 0.08f) {
-                        val theta = (-kpRotation * rawErrX * 0.5f).coerceIn(-0.15f, 0.15f).toDouble()
-                        try {
-                            headController.stopGaze()
-                            delay(150L)
-                            movementController.rotateAwait(theta = theta, maxSpeed = 0.2f)
-                            delay(300L)
-                        } catch (e: Exception) { Log.e(TAG, "Error during final alignment: ${e.message}") }
-                    }
-
-                    headController.resetHead()
-                    listener?.onObjectReached(target.label, target)
-                    return@launch
-                }            }
             Log.i(TAG, "Tracking loop finished.")
         }
     }
@@ -415,7 +301,7 @@ class VisualServoingController(
             Log.i(TAG, "Requesting tracking job cancellation...")
             trackingJob?.cancel()
             try {
-                // verifica se portare a 2000L il timeout -> per logica PLANNER
+                // CHECK verifica se portare a 2000L il timeout -> per logica PLANNER
                 withTimeoutOrNull(500L) { trackingJob?.join() }
             } catch (e: Exception) {
                 Log.w(TAG, "Error joining job: ${e.message}")

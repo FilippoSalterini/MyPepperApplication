@@ -156,8 +156,9 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         override fun onDistanceChanged(meters: Double)                = ui { ui.updateDistance(meters) }
         override fun onServoingStarted(labels: List<String>)          = ui { ui.showToast("Searching: ${labels.joinToString(", ")}") }
         override fun onServoingStopped()                              = ui { ui.showToast("Visual Servoing stopped") }
-        override fun onObjectReached(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
+        override fun onObjectCentered(label: String, box: BoundingBox) = ui { ui.showToast("Object found: $label") }
         override fun onObjectLost(labels: List<String>)               = ui { ui.showToast("Object lost: ${labels.joinToString(", ")}") }
+        override fun onObjectsSpotted(spotted: List<BoundingBox>) { /*non presente in UI*/ }
         override fun onChargingFlapOpen()                             = ui { ui.showToast("Charging flap open — movement blocked") }
         override fun onPersonFound(human: Human)                      = ui { ui.showToast("Person found!") }
         override fun onPersonNotFound()                               = ui { ui.showToast("No person found") }
