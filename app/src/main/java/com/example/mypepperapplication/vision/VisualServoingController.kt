@@ -39,6 +39,9 @@ class VisualServoingController(
 
     var centeredFrames = 0
     val centeredRequired = 3
+    var scanHeightLow:  Double = 0.3
+    var scanHeightMid:  Double = 1.0
+    var scanHeightHigh: Double = 1.8
 
     /*
     Parametri di Scan
@@ -88,7 +91,6 @@ class VisualServoingController(
         Log.i(TAG, "Visual servoing started. Targets=$labels")
 
         trackingJob = scope.launch {
-
             // ── FASE 0: SCAN ──────────────────────────────────────────────────
             Log.i(TAG, "PHASE 0 SCAN — looking for $labels over $scanSteps steps")
             val halfSteps = scanSteps / 2
@@ -100,7 +102,7 @@ class VisualServoingController(
             // Accumulo di TUTTI gli oggetti visti durante lo scan, non solo il target.
             // Dedup per label: si tiene solo la detection con score più alto vista finora.
             val spottedByLabel = mutableMapOf<String, BoundingBox>()
-
+            var currentGazeHeight = scanHeightMid
             var found = false
             for ((idx, angle) in angles.withIndex()) {
                 if (!isActive || found) break
@@ -110,17 +112,17 @@ class VisualServoingController(
 
                 movementController.rotateAwait(theta = angle)
 
-                val scanErrY = when (idx % 3) {
-                    0    -> -0.45f
-                    1    -> -0.10f
-                    else ->  0.20f
+                val scanHeight = when (idx % 3) {
+                    0    -> scanHeightLow
+                    1    -> scanHeightMid
+                    else -> scanHeightHigh
                 }
-                headController.setGaze(normErrX = 0f, normErrY = scanErrY, scanMode = true)
+                Log.d(TAG, "SCAN step idx=$idx angle=%.3f targetHeight=%.2f".format(angle, scanHeight))
+                headController.setGaze(normErrX = 0f, normErrY = 0f, scanMode = true, scanHeightM = scanHeight)
                 delay(scanDelayMs)
-
                 val bmp = captureFrame(cameraController)
                 val boxesThisFrame = if (bmp != null) runDetection(detectionController, bmp) else emptyList()
-
+                Log.d(TAG, "SCAN step idx=$idx detected=${boxesThisFrame.map { "${it.label}:%.2f".format(it.score) }}")
                 // Accumula ogni detection di questo frame (indipendentemente dal target),
                 // tenendo per ciascuna label lo score più alto osservato finora.
                 for (box in boxesThisFrame) {
@@ -133,10 +135,14 @@ class VisualServoingController(
                 val hit = boxesThisFrame.bestMatch(labels)
 
                 if (hit != null) {
-                    Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx")
+                    Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx height=$scanHeight")
+                    currentGazeHeight = scanHeight
                     headController.stopGaze()
                     delay(150L)
-                    headController.setGaze(normErrX = hit.cx - 0.5f, normErrY = hit.cy - 0.5f)
+                    headController.setGaze(
+                        normErrX = hit.cx - 0.5f, normErrY = hit.cy - 0.5f,
+                        scanMode = true, scanHeightM = currentGazeHeight
+                    )
                     found = true
                 }
             }
@@ -199,10 +205,12 @@ class VisualServoingController(
 
                 smoothErrX = lpfAlpha * rawErrX + (1f - lpfAlpha) * smoothErrX
                 smoothErrY = lpfAlpha * rawErrY + (1f - lpfAlpha) * smoothErrY
-                headController.setGaze(normErrX = rawErrX, normErrY = rawErrY)
+                val heightGain = 0.5
+                currentGazeHeight = (currentGazeHeight - rawErrY * heightGain).coerceIn(0.1, 2.2)
 
-                Log.d(TAG, "CENTER [${target.label}] rawErrX=%.3f smoothErrX=%.3f".format(rawErrX, smoothErrX))
+                headController.setGaze(normErrX = rawErrX, normErrY = rawErrY, scanMode = true, scanHeightM = currentGazeHeight)
 
+                Log.d(TAG, "CENTER [${target.label}] rawErrX=%.3f rawErrY=%.3f height=%.2f".format(rawErrX, rawErrY, currentGazeHeight))
                 when {
                     abs(rawErrX) <= headOnlyZone -> {
                         nearZoneFrames = 0
@@ -240,7 +248,7 @@ class VisualServoingController(
                         movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
                         smoothErrX = 0f
                         smoothErrY = 0f
-                        headController.setGaze(normErrX = 0f, normErrY = -0.1f)
+                        headController.setGaze(normErrX = 0f, normErrY = -0.1f, scanMode = true, scanHeightM = currentGazeHeight)
                         delay(300L)
 
                     }

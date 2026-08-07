@@ -7,6 +7,7 @@ import com.aldebaran.qi.sdk.builder.TransformBuilder
 import com.aldebaran.qi.sdk.builder.LookAtBuilder
 import com.aldebaran.qi.sdk.`object`.actuation.FreeFrame
 import com.aldebaran.qi.sdk.`object`.actuation.LookAtMovementPolicy
+import com.aldebaran.qi.sdk.`object`.geometry.Vector3
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -44,32 +45,28 @@ class HeadMovementController {
     private fun buildGazeTransform(
         normErrX: Float,
         normErrY: Float,
-        scanMode: Boolean = false
+        scanMode: Boolean = false,
+        scanHeightM: Double? = null
     ) = run {
-        val lateral = clampLateral(-normErrX * 1.0f).toDouble() //prima era -normerrx * 1.3f
-        /*
-         Distanza avanti: più grande = testa più alta
-         TEST:
-         1) 3.5 sguardo troppo basso
-         -> se no testa val adjustedErrY = normErrY - 0.15f  // sposta il punto di mira verso l'alto
-                        val forward = (2.2f - adjustedErrY * 1.8f).coerceIn(1.2f, 4.0f)
-         */
-        val forward = if (scanMode) {
-            5.0
-        } else {
-            (3.5f - normErrY * 1.8f).coerceIn(1.5f, 5.0f).toDouble()
-        }
+        val lateral = clampLateral(-normErrX * 1.0f).toDouble()
+        val forward = if (scanMode) 3.0 else (3.5f - normErrY * 1.8f).coerceIn(1.5f, 5.0f).toDouble()
 
-        TransformBuilder.create().from2DTransform(forward, lateral, 0.0)
+        val transform = TransformBuilder.create().from2DTransform(forward, lateral, 0.0)
+        if (scanMode && scanHeightM != null) {
+            val t = transform.translation
+            transform.translation = Vector3(t.x, t.y, scanHeightM)
+            Log.d(TAG, "SCAN gaze target: forward=%.2f lateral=%.2f z(richiesto)=%.2f z(applicato)=%.2f"
+                .format(forward, lateral, scanHeightM, transform.translation.z))
+
+        }
+        transform
     }
-    /**
-     * Aggiorna lo sguardo del robot. Rimane una funzione normale (non-suspend)
-     * perché l'aggiornamento del FreeFrame o l'avvio asincrono del LookAt non sono bloccanti.
-     */
+
     fun setGaze(
         normErrX: Float = 0f,
         normErrY: Float = 0f,
-        scanMode: Boolean = false
+        scanMode: Boolean = false,
+        scanHeightM: Double? = null
     ) {
         //se è in corso un teardown (onRobotLost), non proseguire.
         if (isTearingDown.get()) {
@@ -78,7 +75,7 @@ class HeadMovementController {
         }
 
         val ctx = qiContext ?: return
-        val transform = buildGazeTransform(normErrX, normErrY, scanMode)
+        val transform = buildGazeTransform(normErrX, normErrY, scanMode, scanHeightM)
         val robotFrame = ctx.actuation.robotFrame()
         val localFrame = gazeFreeFrame
 
