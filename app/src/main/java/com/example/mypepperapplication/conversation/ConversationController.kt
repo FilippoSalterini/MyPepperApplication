@@ -53,7 +53,7 @@ import java.util.concurrent.TimeUnit
  * @property azureKey La chiave di sottoscrizione per i Microsoft Cognitive Speech Services.
  * @property serverIp L'indirizzo IP del server Python backend per LLM ed estrazione etichette.
  * @property serverPort La porta del server backend (default 8000).
- * @property language Codice lingua della conversazione (default "en-US").
+ * @property language Codice lingua della conversazione -> ITALIANO.
  * @property voiceSpeed Velocità di sintesi vocale QiSDK (default 100).
  * @property voicePitch Tono/Altezza di sintesi vocale QiSDK (default 100).
  */
@@ -84,13 +84,13 @@ class ConversationController(
     private val azureKey: String,
     private val serverIp: String,
     private val serverPort: Int = 8000,
-    private val language: String = "en-US",
+    private val language: String = "it-IT",
     private val voiceSpeed: Int = 100,
     private val voicePitch: Int = 100
 ) {
     private val dialogueState     = DialogueState() //cronologia conversazione
     private val sentenceGenerator = SentenceGenerator()
-    private val saveTriggers = listOf("save", "remember this as", "call this")
+    private val saveTriggers = listOf("salva", "ricorda questo come", "chiama questo")
     private val httpClient = OkHttpClient.Builder() //comunicazione con server python
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -116,32 +116,60 @@ class ConversationController(
     // ── Motion callback — the ONLY bridge to RobotManager ────────────────
     // RobotManager sets this to handle CMD_FOLLOW / CMD_STOP / CMD_APPROACH
     var onMotionCommand: ((String) -> Unit)? = null
-    // ── Motion keyword table (English) ────────────────────────────────────
+    // ── Motion keyword table (ITALIANO) ────────────────────────────────────
     private val motionCommands: Map<String, List<String>> = mapOf(
-        CMD_FOLLOW    to listOf("follow me", "come with me", "come along", "follow"),
-        CMD_STOP      to listOf("stop", "wait", "stay", "hold on", "stand still"),
-        CMD_APPROACH  to listOf("come here", "come closer", "get closer", "approach me"),
-        CMD_START_MAP to listOf("start mapping", "start the map"),
-        CMD_STOP_MAP  to listOf("stop mapping", "finish mapping", "stop the mapping"),
-        CMD_LOAD_MAP  to listOf("restore map", "load map", "load the map", "restore the map")
+        CMD_FOLLOW    to listOf("seguimi", "vieni con me", "andiamo insieme", "segui"),
+        CMD_STOP      to listOf("fermati", "aspetta", "ferma", "stai fermo", "un attimo"),
+        CMD_APPROACH  to listOf("vieni qui", "vieni più vicino", "avvicinati", "vieni da me"),
+        CMD_START_MAP to listOf("inizia la mappa", "crea la mappa", "inizia a mappare"),
+        CMD_STOP_MAP  to listOf("ferma la mappa", "finisci la mappa", "termina la mappa"),
+        CMD_LOAD_MAP  to listOf("carica la mappa", "ripristina la mappa", "carica mappa")
     )
     // Confirmation phrases Pepper says before executing the command
     private val motionReplies: Map<String, String> = mapOf(
-        CMD_FOLLOW   to "Ok, I will follow you!",
-        CMD_STOP     to "Ok, stopping.",
-        CMD_APPROACH to "Sure, coming closer!"
+        CMD_FOLLOW   to "Va bene, ti seguo!",
+        CMD_STOP     to "Ok, mi fermo.",
+        CMD_APPROACH to "Certo, mi avvicino!"
     )
     private val goToTriggers = listOf(
-        "go to", "take me to", "navigate to", "walk to", "head to", "can you go to","back to"
+        "portami", "accompagnami", "vai a", "vai in", "vai verso",
+        "va a", "va in", "va verso", "andare", "andiamo", "torna",
+        "raggiungi", "spostati", "muoviti verso", "muoviti a", "muoviti in",
+        "recati a", "recati in"
     )
+    // Preposizioni e articoli che seguono i trigger di navigazione.
+    private val leadingParticles = listOf(
+        "allo", "alla", "agli", "alle", "nello", "nella", "negli", "nelle",
+        "dello", "della", "degli", "delle", "sullo", "sulla",
+        "nel", "del", "sul", "ai", "al", "in", "a", "da", "verso",
+        "il", "lo", "la", "i", "gli", "le", "l'", "un", "una"
+    )
+
+    private fun stripLeadingParticles(raw: String): String {
+        var s = raw.trim()
+        var changed = true
+        while (changed) {
+            changed = false
+            for (p in leadingParticles) {
+                if (s.startsWith("$p ", ignoreCase = true)) {
+                    s = s.substring(p.length).trim(); changed = true; break
+                }
+                if (p.endsWith("'") && s.startsWith(p, ignoreCase = true)) {
+                    s = s.substring(p.length).trim(); changed = true; break
+                }
+            }
+        }
+        return s
+    }
     // ── Exit keywords ─────────────────────────────────────────────────────
-    private val exitPhrases = listOf("goodbye", "bye", "see you", "that's all")
+    private val exitPhrases = listOf("arrivederci", "ciao ciao", "a presto", "è tutto", "basta così")
     /*
     - isTrackIntent() serve per controllare se la frase contiene le keyword di ricerca
     - extractLabel() invece chiama /extract_label e ottiene il label YOLO della frase
      */
-    private val trackTriggers = listOf("find", "look for", "where is", "where are", "search", "track", "locate")
-
+    private val trackTriggers = listOf(
+        "trova", "cerca", "dov'è", "dove è", "dove sono", "cercami", "guarda dove"
+    )
     private fun isTrackIntent(sentence: String): Boolean =
         trackTriggers.any { sentence.lowercase().contains(it) }
 
@@ -150,7 +178,7 @@ class ConversationController(
     private fun extractSavePoiName(sentence: String): String? {
         val lower = sentence.lowercase()
         val trigger = saveTriggers.filter { lower.startsWith("$it ") }.maxByOrNull { it.length } ?: return null
-        val name = sanitizeName(sentence.substring(trigger.length))
+        val name = stripLeadingParticles(sanitizeName(sentence.substring(trigger.length)))
         return name.ifBlank { null }
     }
 
@@ -163,7 +191,7 @@ class ConversationController(
             .maxByOrNull { it.length } ?: return null
         val idx = lower.indexOf(trigger)
         val afterTrigger = sentence.substring(idx + trigger.length)
-        val name = sanitizeName(afterTrigger)
+        val name = stripLeadingParticles(sanitizeName(afterTrigger))
         return name.ifBlank { null }
     }
     // comunica con il server per ottenere la label dell oggetto ed estrarla dalla frase
@@ -242,10 +270,11 @@ class ConversationController(
             extractGoToPoiName(userSentence)?.let { rawName ->
                 val match = knownPoiNames.firstOrNull { it.equals(rawName, ignoreCase = true) }
                     ?: knownPoiNames.firstOrNull { it.contains(rawName, ignoreCase = true) || rawName.contains(it, ignoreCase = true) }
+                Log.i(TAG, "GoTo intent: rawName='$rawName', knownPoiNames=$knownPoiNames, match=$match")
                 if (match != null) {
                     onMotionCommand?.invoke("goto_poi:$match")
                 } else {
-                    val reply = "I don't know a place called $rawName. Try saying it differently."
+                    val reply = "Non conosco un posto che si chiama $rawName. Prova a dirlo in un altro modo."
                     onRobotSpeech?.invoke(reply)
                     sayMessage(reply)
                 }
@@ -258,13 +287,13 @@ class ConversationController(
                 if (label == "person") {
                     // "trova una persona/l'umano" → usa FindPersonController, più rapido e affidabile
                     // del visual servoing YOLO per un target generico come "person"
-                    val reply = "Ok, I'll look for you!"
+                    val reply = "OK, cerco una persona!"
                     onRobotSpeech?.invoke(reply)
                     sayMessage(reply)
                     onMotionCommand?.invoke("find_person")
                     continue
                 } else if (label != "none") {
-                    val reply = "Ok, I'll look for the $label!"
+                    val reply = "Va bene, cerco ${LabelIt.of(label)}!"
                     onRobotSpeech?.invoke(reply)
                     sayMessage(reply)
                     onMotionCommand?.invoke("track:$label")
@@ -446,7 +475,7 @@ class ConversationController(
         writeWavFile(audioBytes, tempFile)
 
         val speechConfig = SpeechConfig.fromSubscription(azureKey, AZURE_REGION).apply {
-            speechRecognitionLanguage = "en-US"
+            speechRecognitionLanguage = language
             setProperty("OPENSSL_DISABLE_CRL_CHECK", "true")
         }
         val audioConfig = AudioConfig.fromWavFileInput(tempFile.absolutePath)

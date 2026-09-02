@@ -131,6 +131,10 @@ class UiController(
             RobotMode.EMERGENCY_STOPPED -> {
                 binding.tvStatus.text = "EMERGENCY STOPPED"
             }
+            RobotMode.NAVIGATING -> {
+                binding.tvStatus.text = "Navigating…"
+                binding.spinnerLabel.isEnabled = false
+            }
         }
     }
 

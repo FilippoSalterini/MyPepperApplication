@@ -42,6 +42,8 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
         private const val REQUEST_AUDIO = 100
         const val ACTION_EMERGENCY_STOP = "com.example.mypepperapplication.EMERGENCY_STOP"
         const val ACTION_RESET_ESTOP = "com.example.mypepperapplication.RESET_ESTOP"
+        const val ACTION_START_PLAN = "com.example.mypepperapplication.START_PLAN"
+        const val ACTION_STOP_PLAN  = "com.example.mypepperapplication.STOP_PLAN"
     }
     private lateinit var binding: ActivityMainBinding
     private lateinit var ui: UiController
@@ -125,6 +127,7 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
     private fun registerEmergencyStopReceiver() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
+                Log.i(TAG, "Broadcast ricevuto: ${intent?.action}")
                 if (!::robotManager.isInitialized) {
                     Log.w(TAG, "Broadcast ignored: robotManager not yet initialized")
                     return
@@ -138,14 +141,24 @@ class MainActivity : AppCompatActivity(), RobotLifecycleCallbacks {
                         Log.i(TAG, "RESET received via adb broadcast")
                         robotManager.resetEmergencyStop()
                     }
+                    ACTION_START_PLAN -> {
+                        Log.i(TAG, "START PLAN received via adb broadcast")
+                        robotManager.startPlan()
+                    }
+                    ACTION_STOP_PLAN -> {
+                        Log.i(TAG, "STOP PLAN received via adb broadcast")
+                        robotManager.stopPlan()
+                    }
                 }
             }
         }
         val filter = IntentFilter().apply {
             addAction(ACTION_EMERGENCY_STOP)
             addAction(ACTION_RESET_ESTOP)
+            addAction(ACTION_START_PLAN)
+            addAction(ACTION_STOP_PLAN)
         }
-        ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         emergencyStopReceiver = receiver
     }
     private fun buildRobotListener() = object : RobotManager.RobotManagerListener {
