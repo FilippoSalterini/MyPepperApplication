@@ -98,7 +98,7 @@ class ProblemGenerator(private val state: WorldState) {
         if (real != null && real in state.objectFound) init.add("(object_found $encoded)")
         val srooms = state.searched.filter { it.second == real }.map { it.first }.toSet()
         for (rm in srooms.sorted()) init.add("(searched ${rm.pddl()} $encoded)")
-        if (srooms.containsAll(state.rooms) && (real == null || real !in state.objectFound)) {
+        if (real != null && state.isAllSearched(real)) {
             init.add("(all_searched $encoded)")
         }
     }

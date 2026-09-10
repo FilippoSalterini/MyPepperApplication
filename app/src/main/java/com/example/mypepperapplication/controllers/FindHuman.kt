@@ -62,6 +62,17 @@ class FindHuman(
             movementController.rotateAwait(thetaRad)
             delay(STEP_DELAY_MS)
         }
+        // Controllo finale: il ciclo controlla PRIMA di ruotare, quindi l'ultimo
+        // settore raggiunto non verrebbe mai osservato dopo esserci arrivati.
+
+        if (running) {
+            detectHuman()?.let { human ->
+                Log.i(TAG, "Person found after final rotation")
+                running = false
+                withContext(Dispatchers.Main) { listener?.onPersonFound(human) }
+                return
+            }
+        }
 
         if (running) {
             Log.w(TAG, "Scan complete — no person found")

@@ -32,7 +32,8 @@ import android.content.IntentFilter
  *   3. Wiring UI → RobotManager tramite [bindUiToRobot]
  *   Resto : logica robot → RobotManager, logica UI → UiController.
  *
- *   CHIAMATE PER STOP E RESET
+ *   COMANDI DI CONTROLLO
+ *   adb shell am broadcast -a com.example.mypepperapplication.STOP_PLAN
  *   adb shell am broadcast -a com.example.mypepperapplication.EMERGENCY_STOP
  *   adb shell am broadcast -a com.example.mypepperapplication.RESET_ESTOP
  */

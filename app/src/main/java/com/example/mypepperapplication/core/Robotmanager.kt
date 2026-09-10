@@ -120,7 +120,6 @@ class RobotManager(
 
     companion object {
         private const val TAG = "RobotManager"
-        // nel companion object:
         private const val VISUAL_SERVOING_AWAIT_TIMEOUT_MS = 90_000L
         private const val FIND_HUMAN_AWAIT_TIMEOUT_MS = 45_000L
         private const val APPROACH_HUMAN_AWAIT_TIMEOUT_MS = 60_000L
@@ -202,8 +201,6 @@ class RobotManager(
 
                 override fun onObjectsSpotted(spotted: List<BoundingBox>) {
                     Log.i(TAG, "Objects spotted during scan: ${spotted.map { it.label }}")
-                    // NOTA: qui in futuro andrà l'inoltro a WorldStateManager (label + PoI corrente).
-                    // Per ora si limita a propagare l'evento verso l'UI/listener esterno.
                     managerScope.launch {
                         withContext(Dispatchers.Main) { listener?.onObjectsSpotted(spotted) }
                     }
@@ -612,7 +609,7 @@ class RobotManager(
             return ActionResult.Rejected("Transizione a NAVIGATING rifiutata da ${currentMode.get()}")
 
         val status = try {
-            nav.moveTo(poiName)                 // attesa FUORI dal lock
+            nav.moveTo(poiName) // attesa FUORI dal lock
         } finally {
             // NonCancellable: il modo deve tornare a IDLE anche se la coroutine
             // chiamante viene cancellata, altrimenti il robot resta bloccato
@@ -805,8 +802,9 @@ class RobotManager(
      * Il reset di modo/risorse avviene UNA sola volta nel finally tramite
      * cleanStopServoing() (la stessa funzione già usata dal listener condiviso),
      * invece che duplicato in ogni branch come nella versione reattiva.
-     * onObjectsSpotted continua a propagare solo verso la UI esterna: non esiste
-     * ancora un WorldStateManager a cui inoltrarlo.
+     * onObjectsSpotted inoltra a WorldStateManager la conoscenza gratuita raccolta
+     * durante lo scan (gli oggetti visti finiscono in object_at sulla stanza corrente),
+     * oltre a propagare verso la UI esterna.
      * Nessun sayMessage: stesso principio delle altre await, la voce è un'azione
      * a sé nel dominio.
      */
@@ -838,6 +836,7 @@ class RobotManager(
                                 if (cont.isActive) cont.resume(ServoingOutcome.Lost(labels))
                             }
                             override fun onObjectsSpotted(spotted: List<BoundingBox>) {
+                                worldStateManager?.applySpottedObjects(spotted.map { it.label })
                                 managerScope.launch {
                                     withContext(Dispatchers.Main) { listener?.onObjectsSpotted(spotted) }
                                 }
@@ -915,7 +914,7 @@ class RobotManager(
                                     approachHuman = null
                                     setMode(RobotMode.IDLE)
                                     conversationController?.sayMessage(
-                                        "Eccomi, sono qui con te.",
+                                        "Eccomi, sono vicino a te.",
                                         isActionFeedback = true
                                     )
                                     withContext(Dispatchers.Main) { listener?.onCloseEnoughToHuman() }
@@ -994,7 +993,7 @@ class RobotManager(
                                     lastKnownPerson = human
                                     setMode(RobotMode.IDLE)
                                     conversationController?.sayMessage(
-                                        "Ti ho trovato! Adesso ti vedo.",
+                                        "Eccoti!",
                                         isActionFeedback = true
                                     )
                                     withContext(Dispatchers.Main) { listener?.onPersonFound(human) }

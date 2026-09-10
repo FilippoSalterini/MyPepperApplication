@@ -102,11 +102,18 @@ class WorldStateManager(
         // NB: pepper_domain non azzera has_task su report (a differenza del dominio
         // esteso) — non lo tocchiamo qui, per restare fedeli al modello.
     }
+    fun applySpottedObjects(labels: Collection<String>) {
+        val room = state.robotAt
+        for (label in labels.distinct()) {
+            state.objectAt.getOrPut(label) { mutableSetOf() }.add(room)
+        }
+    }
     fun applyFindHuman(room: String, result: ActionResult, human: String = DEFAULT_HUMAN) {
         when (result) {
             is ActionResult.Success -> {
                 state.humanAt[human] = room
                 state.humans.add(human)
+                state.searchedRooms.clear()
             }
             is ActionResult.Failure -> state.searchedRooms.add(room)
             else -> { /* Cancelled/Rejected: azione mai completata, nessuna modifica */ }
