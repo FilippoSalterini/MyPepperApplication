@@ -15,7 +15,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
-
+import com.example.mypepperapplication.core.AppConfig
 private const val TAG = "PlannerClient"
 
 /**
@@ -48,7 +48,7 @@ sealed class PlanResult {
  */
 class PlannerClient(
     private val serverIp: String,
-    private val serverPort: Int = 8000
+    private val serverPort: Int = AppConfig.SERVER_PORT
 ) {
     companion object {
         private const val CONNECT_TIMEOUT_S = 5L

@@ -1,5 +1,6 @@
 package com.example.mypepperapplication.vision
 
+import com.example.mypepperapplication.core.AppConfig
 import androidx.core.graphics.scale
 import android.graphics.Bitmap
 import android.graphics.RectF
@@ -60,7 +61,7 @@ class ObjectDetectionController {
     }
 
     @Volatile
-    var serverUrl: String = "http://10.186.13.27:8000" // URL del server YOLOv8n
+    var serverUrl: String = AppConfig.DETECTION_SERVER_URL
     var jpegQuality: Int = 70
 
     // OkHttpClient configurato localmente, ma idealmente (appunto in questo

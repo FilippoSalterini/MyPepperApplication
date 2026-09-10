@@ -14,14 +14,15 @@ private fun String.pddl(): String =
 /** Problema PDDL generato + tabella per ritradurre i nomi del piano in nomi reali. */
 data class GeneratedProblem(
     val text: String,
-    val nameMap: Map<String, String>   // "posizione_uno" -> "posizione uno"
+    val nameMap: Map<String, String>
 )
 
 class ProblemGenerator(private val state: WorldState) {
 
     fun computeGoal(human: String = WorldStateManager.DEFAULT_HUMAN): String {
         val target = (state.bound ?: "target").pddl()
-        return "(informed ${human.pddl()} $target)"
+        val h = human.pddl()
+        return "(or (informed $h $target) (task_declined $h))"
     }
 
     fun generateProblem(goal: String): GeneratedProblem {
@@ -44,6 +45,7 @@ class ProblemGenerator(private val state: WorldState) {
             if (h in state.nearHuman) init.add("(near_human pepper ${h.pddl()})")
         }
         if (state.hasTask) init.add("(has_task pepper)")
+        if (state.taskDeclined) init.add("(task_declined ${WorldStateManager.DEFAULT_HUMAN.pddl()})")
         for (rm in state.searchedRooms.sorted()) init.add("(searched_human ${rm.pddl()})")
         for (o in others) writeObjectFacts(init, o, o)
         writeObjectFacts(init, taskName, state.bound)

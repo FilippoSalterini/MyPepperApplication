@@ -33,32 +33,26 @@ class ConversationSpeechBridge(
         private const val ASK_TIMEOUT_MS = 30_000L
     }
 
-    private val pending = AtomicReference<CompletableDeferred<String>?>(null)
+    private val pending = AtomicReference<CompletableDeferred<TaskAnswer>?>(null)
 
-    override suspend fun askTask(): String? {
-        val deferred = CompletableDeferred<String>()
+    /** true mentre askTask() e' in attesa. Serve a ConversationController per
+     *  bypassare isTrackIntent(): una risposta a una domanda non ha la forma
+     *  di un comando spontaneo, e senza bypass /extract_label non verrebbe
+     *  mai interrogata su "la bottiglia". */
+    val isAwaitingTask: Boolean get() = pending.get() != null
+
+    override suspend fun askTask(): TaskAnswer {
+        val deferred = CompletableDeferred<TaskAnswer>()
         pending.set(deferred)
         return try {
             say("Dimmi, cosa posso cercare per te?")
-            val label = withTimeoutOrNull(ASK_TIMEOUT_MS) { deferred.await() }
-            if (label == null) Log.w(TAG, "Nessuna risposta entro il timeout")
-            else Log.i(TAG, "Task ricevuto dalla persona: $label")
-            label
+            val answer = withTimeoutOrNull(ASK_TIMEOUT_MS) { deferred.await() }
+                ?: TaskAnswer.NoAnswer
+            Log.i(TAG, "Risposta alla richiesta di compito: $answer")
+            answer
         } finally {
             pending.compareAndSet(deferred, null)
         }
-    }
-
-    // Frasi fisse e deterministiche: sono il punto in cui Pepper dichiara un fatto
-    // sul mondo, ed è lì che un LLM sarebbe più pericoloso. Per variare, basta una
-    // listOf(...).random() qui dentro — ma per i primi test è meglio deterministico,
-    // così le frasi si correlano esattamente col log.
-    override suspend fun reportFound(label: String) {
-        say("Ho trovato ${LabelIt.of(label)}!")
-    }
-
-    override suspend fun reportNotFound(label: String) {
-        say("Non sono riuscito a trovare ${LabelIt.of(label)}, mi dispiace.")
     }
 
     /**
@@ -68,6 +62,16 @@ class ConversationSpeechBridge(
      */
     fun offerLabel(label: String): Boolean {
         val deferred = pending.getAndSet(null) ?: return false
-        return deferred.complete(label)
+        return deferred.complete(TaskAnswer.Label(label))
+    }
+    override suspend fun reportFound(label: String) {
+        say("Ho trovato ${LabelIt.of(label)}!")
+    }
+    override suspend fun reportNotFound(label: String) {
+        say("Non sono riuscito a trovare ${LabelIt.of(label)}, mi dispiace.")
+    }
+    fun offerDecline(): Boolean {
+        val deferred = pending.getAndSet(null) ?: return false
+        return deferred.complete(TaskAnswer.Declined)
     }
 }

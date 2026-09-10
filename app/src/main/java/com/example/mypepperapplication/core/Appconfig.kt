@@ -1,7 +1,11 @@
 package com.example.mypepperapplication.core
+
 object AppConfig {
-    /** Indirizzo del server YOLOv8 sulla rete locale. */
-    const val DETECTION_SERVER_URL = "http://10.186.13.54:8000"
-    const val SERVER_IP            = "10.186.13.54"
+    /** Indirizzo del server sulla rete locale (YOLOv8 + dialogo + planning). */
+    const val SERVER_IP   = "130.251.2.192"
+    const val SERVER_PORT = 12365
+
+    const val DETECTION_SERVER_URL = "http://$SERVER_IP:$SERVER_PORT"
+
     const val LANGUAGE = "it-IT"
 }

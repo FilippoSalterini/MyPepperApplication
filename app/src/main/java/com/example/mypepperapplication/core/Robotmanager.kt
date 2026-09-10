@@ -1048,8 +1048,10 @@ class RobotManager(
             it.onListening = { Log.d(TAG, "Conversation: listening") }
             it.onUserSpeech = { text -> Log.i(TAG, "User: $text") }
             it.onRobotSpeech = { text -> Log.i(TAG, "Pepper: $text") }
+            it.isAwaitingTask = { speechBridge.isAwaitingTask }
             it.onMotionCommand = { cmd ->
                 when {
+                    cmd == "decline_task" -> { speechBridge.offerDecline() }
                     cmd == CMD_FOLLOW -> startFollowHumanAutoDetect()
                     cmd == CMD_STOP -> stopAll()
                     cmd == CMD_APPROACH -> startApproachHuman()

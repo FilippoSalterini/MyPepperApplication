@@ -1,5 +1,6 @@
 package com.example.mypepperapplication.conversation
 
+import com.example.mypepperapplication.core.AppConfig
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -18,6 +19,8 @@ import com.aldebaran.qi.sdk.builder.SayBuilder
 import com.microsoft.cognitiveservices.speech.*
 import com.microsoft.cognitiveservices.speech.audio.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -69,7 +72,7 @@ private const val SHORT_SILENCE_MS  = 400L //dopo 400ms di silence, inizia la ri
 private const val LONG_SILENCE_MS   = 2500L //dopo 2.5s considera terminata tutta la frase
 private const val INITIAL_TIMEOUT_MS = 60_000L
 private const val AZURE_REGION      = "westeurope"
-
+private const val SPEECH_TAIL_MS = 250L   // coda audio del TTS dopo il ritorno di speak()
 // Motion command labels — used by RobotManager to dispatch actions
 const val CMD_FOLLOW  = "follow"
 const val CMD_STOP    = "stop"
@@ -83,7 +86,7 @@ class ConversationController(
     private val qiContext: QiContext,
     private val azureKey: String,
     private val serverIp: String,
-    private val serverPort: Int = 8000,
+    private val serverPort: Int = AppConfig.SERVER_PORT,
     private val language: String = "it-IT",
     private val voiceSpeed: Int = 100,
     private val voicePitch: Int = 100
@@ -99,7 +102,7 @@ class ConversationController(
     @Volatile var isRunning = false
         private set
     @Volatile private var isSpeaking = false
-    private var pendingFeedback: String? = null
+    private val speechMutex = Mutex()
     private val bufferSize = 2 * AudioRecord.getMinBufferSize(
         SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
     )
@@ -112,6 +115,7 @@ class ConversationController(
     var onUserSpeech:   ((String) -> Unit)? = null
     var onRobotSpeech:  ((String) -> Unit)? = null
     var knownPoiNames: List<String> = emptyList()
+    var isAwaitingTask: () -> Boolean = { false }
 
     // ── Motion callback — the ONLY bridge to RobotManager ────────────────
     // RobotManager sets this to handle CMD_FOLLOW / CMD_STOP / CMD_APPROACH
@@ -172,7 +176,12 @@ class ConversationController(
     )
     private fun isTrackIntent(sentence: String): Boolean =
         trackTriggers.any { sentence.lowercase().contains(it) }
-
+    private val declinePhrases = setOf(
+        "no", "no grazie", "niente", "nulla", "niente grazie",
+        "sto bene", "va bene cosi", "va bene così", "tutto a posto", "no no"
+    )
+    private fun isDecline(s: String): Boolean =
+        s.trim().lowercase().trimEnd('.', '!', '?') in declinePhrases
     // Estrae il nome del POI da salvare identificando il trigger iniziale più lungo.
     // Rimuove il prefisso trovato e restituisce il resto del testo pulito, oppure null se vuoto.
     private fun extractSavePoiName(sentence: String): String? {
@@ -250,7 +259,33 @@ class ConversationController(
                 isRunning = false
                 break
             }
-
+            // 1b. Il planner sta aspettando la risposta a speak_ask_task.
+            // Qui la frase e' una RISPOSTA, non un comando, e non ne ha la forma:
+            // isTrackIntent fallirebbe su "la bottiglia" e /extract_label non
+            // verrebbe mai chiamata. Bypass di tutti i controlli sui comandi,
+            // tranne "fermati" che resta la via d'uscita.
+            if (isAwaitingTask()) {
+                if (matchMotionCommand(userSentence) == CMD_STOP) {
+                    onMotionCommand?.invoke(CMD_STOP)
+                    continue
+                }
+                if (isDecline(userSentence)) {
+                    val reply = "Va bene, sono qui se ti serve."
+                    onRobotSpeech?.invoke(reply); sayMessage(reply)
+                    onMotionCommand?.invoke("decline_task")
+                    continue
+                }
+                val label = extractLabel(userSentence)
+                if (label == "none") {
+                    val reply = "Non ho capito cosa cerchi. Puoi dirmi il nome dell'oggetto?"
+                    onRobotSpeech?.invoke(reply); sayMessage(reply)
+                    continue   // l'executor aspetta ancora: si riprova nello stesso timeout
+                }
+                val reply = "Va bene, cerco ${LabelIt.of(label)}."
+                onRobotSpeech?.invoke(reply); sayMessage(reply)
+                onMotionCommand?.invoke("track:$label")
+                continue
+            }
             // 2. Motion command check — intercepts BEFORE hitting the server
             val matchedCmd = matchMotionCommand(userSentence)
             if (matchedCmd != null) {
@@ -553,25 +588,17 @@ class ConversationController(
     // ─────────────────────────────────────────────────────────────────────
     // TTS via QiSDK
     // ─────────────────────────────────────────────────────────────────────
-    suspend fun sayMessage(text: String, isActionFeedback: Boolean = false) = withContext(Dispatchers.IO) {
-        if (isSpeaking) {
-            if (isActionFeedback) {
-                // Non perdiamo feedback importanti — li accodiamo
-                pendingFeedback = text
-                Log.d(TAG, "Feedback queued: $text")
+    suspend fun sayMessage(text: String, isActionFeedback: Boolean = false) {
+        speechMutex.withLock {
+            withContext(Dispatchers.IO) {
+                isSpeaking = true
+                try {
+                    speak(text)
+                    delay(SPEECH_TAIL_MS)
+                } finally {
+                    isSpeaking = false
+                }
             }
-            return@withContext
-        }
-        isSpeaking = true
-        try {
-            speak(text)
-            // Dopo aver finito, controlla se c'è un feedback in attesa
-            pendingFeedback?.let { pending ->
-                pendingFeedback = null
-                speak(pending)
-            }
-        } finally {
-            isSpeaking = false
         }
     }
 

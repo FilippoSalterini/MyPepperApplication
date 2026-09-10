@@ -24,7 +24,7 @@ class WorldState(
     var hasTask: Boolean = false                              // has_task ?r — flag globale
     val informed = mutableSetOf<Pair<String, String>>()      // (umano, oggetto)
     var bound: String? = null                                  // label YOLO legata al 'target' richiesto
-
+    var taskDeclined: Boolean = false
     /** Tutti gli oggetti di cui esiste una qualche conoscenza — usato dal futuro ProblemGenerator. */
     val knownObjects: Set<String>
         get() = objectAt.keys + objectFound + searched.map { it.second }
@@ -86,6 +86,7 @@ class WorldStateManager(
         state.objectFound.clear()
         state.humanAt.clear()
         state.nearHuman.clear()
+        state.taskDeclined = false
         Log.i(TAG, "Stato azzerato per una nuova esecuzione (robotAt=${state.robotAt})")
     }
     fun applyGoTo(poiName: String, result: ActionResult) {
@@ -143,5 +144,8 @@ class WorldStateManager(
     fun setTask(label: String) {
         state.bound = label
         state.hasTask = true
+    }
+    fun applyDecline() {
+        state.taskDeclined = true
     }
 }

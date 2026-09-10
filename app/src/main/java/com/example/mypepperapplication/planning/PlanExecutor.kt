@@ -6,14 +6,20 @@ import com.example.mypepperapplication.core.RobotManager
 private const val TAG = "PlanExecutor"
 
 /**
- * Ponte verso la parte conversazionale. Il PlanExecutor non parla direttamente:
- * dichiara qui cosa gli serve. L'implementazione che collega ConversationController
- * (e la pipeline /extract_label) è un passo separato, ancora da scrivere.
+ * Esito della richiesta di compito. I tre casi non sono ridondanti:
+ * Declined e' una risposta legittima della persona e chiude l'interazione
+ * senza fallimento; NoAnswer e' un fallimento dell'interazione vera e propria.
+ * Rispecchia il dominio: speak_ask_task ha effetto condizionale
+ * (when (not (task_declined ?h)) (has_task ?r)).
  */
+sealed class TaskAnswer {
+    data class Label(val label: String) : TaskAnswer()
+    object Declined : TaskAnswer()
+    object NoAnswer : TaskAnswer()
+}
 interface SpeechBridge {
-    /** speak_ask_task: chiede cosa cercare e ATTENDE la risposta.
-     *  Ritorna la label COCO estratta, o null se la persona non risponde. */
-    suspend fun askTask(): String?
+    /** speak_ask_task: chiede cosa cercare e ATTENDE la risposta. */
+    suspend fun askTask(): TaskAnswer
     /** speak_report_found */
     suspend fun reportFound(label: String)
     /** speak_report_not_found */
@@ -127,11 +133,20 @@ class PlanExecutor(
                 abortIfNeeded(result, action)
             }
 
-            "speak_ask_task" -> {
-                val label = speech.askTask()
-                    ?: return ExecutionOutcome.Aborted("La persona non ha indicato cosa cercare")
-                worldStateManager.setTask(label)
-                null
+            "speak_ask_task" -> when (val answer = speech.askTask()) {
+                is TaskAnswer.Label -> {
+                    worldStateManager.setTask(answer.label)
+                    null
+                }
+                // Il rifiuto non e' un fallimento: l'azione e' riuscita, ha solo
+                // prodotto l'altro esito. Il ciclo prosegue, e al prossimo giro il
+                // goal disgiuntivo risultera' gia' soddisfatto -> GoalReached.
+                is TaskAnswer.Declined -> {
+                    worldStateManager.applyDecline()
+                    null
+                }
+                is TaskAnswer.NoAnswer ->
+                    ExecutionOutcome.Aborted("Nessuna risposta alla richiesta di compito")
             }
 
             "speak_report_found" -> {
