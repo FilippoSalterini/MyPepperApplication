@@ -21,6 +21,8 @@ class FindHuman(
         private const val ROTATION_STEP_DEG = 45.0
         private const val ROTATION_STEPS    = 8        // 8 × 45grad = 360grad
         private const val STEP_DELAY_MS     = 800L     // attesa dopo ogni rotazione CHECK
+        private const val ROTATION_RETRIES  = 2
+        private const val RETRY_DELAY_MS    = 400L
     }
 
     var listener: FindPersonListener? = null
@@ -47,21 +49,41 @@ class FindHuman(
         headController.stopGaze()
         delay(200L)
 
-        repeat(ROTATION_STEPS) { step ->
+        var coveredDeg = 0.0
+        var step = 0
+        while (step < ROTATION_STEPS) {
             if (!running) return
 
             val human = detectHuman()
             if (human != null) {
-                Log.i(TAG, "Person found at step $step")
+                Log.i(TAG, "Person found at step $step (coverage %.0f°)".format(coveredDeg))
                 running = false
                 withContext(Dispatchers.Main) { listener?.onPersonFound(human) }
                 return
             }
 
             val thetaRad = Math.toRadians(ROTATION_STEP_DEG)
-            movementController.rotateAwait(thetaRad)
+            var rotated = movementController.rotateAwait(thetaRad)
+
+            var attempt = 0
+            while (!rotated && running && attempt < ROTATION_RETRIES) {
+                attempt++
+                Log.w(TAG, "Rotation step $step failed — retry $attempt/$ROTATION_RETRIES")
+                delay(RETRY_DELAY_MS)
+                rotated = movementController.rotateAwait(thetaRad)
+            }
+
+            if (rotated) {
+                coveredDeg += ROTATION_STEP_DEG
+            } else {
+                Log.e(TAG, "Rotation step $step failed after $ROTATION_RETRIES retries — sector skipped")
+            }
+
+            step++
             delay(STEP_DELAY_MS)
         }
+        Log.i(TAG, "Scan coverage: %.0f° of 360°".format(coveredDeg))
+
         // Controllo finale: il ciclo controlla PRIMA di ruotare, quindi l'ultimo
         // settore raggiunto non verrebbe mai osservato dopo esserci arrivati.
 
@@ -75,7 +97,7 @@ class FindHuman(
         }
 
         if (running) {
-            Log.w(TAG, "Scan complete — no person found")
+            Log.w(TAG, "Scan complete — no person found (coverage %.0f°)".format(coveredDeg))
             running = false
             withContext(Dispatchers.Main) { listener?.onPersonNotFound() }
         }

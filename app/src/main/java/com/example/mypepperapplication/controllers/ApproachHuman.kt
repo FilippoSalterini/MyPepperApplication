@@ -9,6 +9,8 @@ import com.aldebaran.qi.sdk.`object`.human.Human
 import com.aldebaran.qi.sdk.builder.GoToBuilder
 import kotlinx.coroutines.*
 import java.util.Timer
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.scheduleAtFixedRate
 import kotlin.math.hypot
@@ -19,7 +21,8 @@ import kotlin.math.hypot
  */
 class ApproachHuman(
     private val qiContext: QiContext,
-    private val listener: ApproachHumanListener? = null
+    private val listener: ApproachHumanListener? = null,
+    private val knownHuman: Human? = null
 ) {
     interface ApproachHumanListener {
         fun onApproachComplete(human: Human)
@@ -34,6 +37,7 @@ class ApproachHuman(
         private const val POLL_INTERVAL_MS = 500L
         private const val HUMAN_SEARCH_TIMEOUT_MS = 5_000L
         private const val MAX_GOTO_ERRORS = 5
+        private const val MAX_HANDLE_DISTANCE = 6.0
     }
 
     private val isRunning  = AtomicBoolean(false)
@@ -60,7 +64,7 @@ class ApproachHuman(
         }
 
         scope.launch {
-            val human = findHuman()
+            val human = validateKnownHuman() ?: findHuman()
             if (human == null) {
                 Log.w(TAG, "No human found")
                 isRunning.set(false)
@@ -154,16 +158,74 @@ class ApproachHuman(
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun findHuman(): Human? = withTimeoutOrNull(HUMAN_SEARCH_TIMEOUT_MS) {
-        suspendCancellableCoroutine { cont ->
-            qiContext.humanAwareness.async().humansAround
-                .andThenConsume { humans ->
-                    cont.resume(humans?.firstOrNull()) {}
-                }
+        var attempt = 0
+        while (isActive) {
+            attempt++
+            val human = pollNearestHuman()
+            if (human != null) {
+                Log.i(TAG, "Human acquired after $attempt poll(s)")
+                return@withTimeoutOrNull human
+            }
+            delay(POLL_INTERVAL_MS)
+        }
+        null
+    }
+    private fun pollNearestHuman(): Human? {
+        return try {
+            val humans = qiContext.humanAwareness
+                .async().humansAround
+                .get(2, TimeUnit.SECONDS) ?: return null
+
+            if (humans.isEmpty()) return null
+
+            val rFrame = qiContext.actuation.robotFrame()
+            humans.minByOrNull { human ->
+                try {
+                    val t = human.headFrame
+                        .computeTransform(rFrame).transform.translation
+                    hypot(t.x, t.y)
+                } catch (_: Exception) { Double.MAX_VALUE }
+            }
+        } catch (_: TimeoutException) {
+            Log.w(TAG, "humansAround timed out")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "HumanAwareness error: ${e.message}")
+            null
         }
     }
-
+    /**
+     * Verifica che l'handle ricevuto da find_human sia ancora agganciato al
+     * tracking di QiSDK. computeTransform fallisce (o restituisce valori
+     * incoerenti) se la persona non è più tracciata: in quel caso l'handle
+     * va scartato e si ricade sulla ricerca percettiva.
+     */
+    private fun validateKnownHuman(): Human? {
+        val human = knownHuman ?: return null
+        return try {
+            val rf = qiContext.actuation.robotFrame()
+            val t = human.headFrame.computeTransform(rf).transform.translation
+            val d = hypot(t.x, t.y)
+            when {
+                d.isNaN() || d <= 0.0 -> {
+                    Log.w(TAG, "Known human handle invalid (d=$d) — falling back to search")
+                    null
+                }
+                d > MAX_HANDLE_DISTANCE -> {
+                    Log.w(TAG, "Known human handle too far (%.2f m) — falling back".format(d))
+                    null
+                }
+                else -> {
+                    Log.i(TAG, "Reusing known human handle (%.2f m) — skipping search".format(d))
+                    human
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Known human handle stale: ${e.message} — falling back to search")
+            null
+        }
+    }
     private fun cleanup() {
         distanceTimer.cancel()
         goToFuture?.requestCancellation()

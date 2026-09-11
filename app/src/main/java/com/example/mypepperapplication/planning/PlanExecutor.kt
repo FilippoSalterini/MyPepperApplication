@@ -82,7 +82,10 @@ class PlanExecutor(
                         return ExecutionOutcome.GoalReached
                     }
                     val first = result.actions.first()
-                    Log.i(TAG, "Piano di ${result.actions.size} azioni, eseguo: $first")
+                    Log.i(TAG, "Piano di ${result.actions.size} azioni:\n" +
+                            result.actions.mapIndexed { i, a -> "  ${i + 1}. $a" }.joinToString("\n"))
+                    if (result.metrics.isNotEmpty()) Log.i(TAG, "metrics: ${result.metrics}")
+                    Log.i(TAG, "Eseguo: $first")
                     executeAction(first, problem.nameMap)?.let { return it }
                 }
             }

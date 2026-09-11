@@ -12,10 +12,12 @@ import kotlin.math.abs
 // VISUAL SERVOING CONTROLLER
 // ===========================================================================
 /**
-*Azione strutturata in due fasi: scanning (SCAN 360°, con accumulo di tutti gli oggetti
-*visti oltre al target) e centraggio di precisione (PHASE 1)
+ * Azione strutturata in due fasi: scanning (SCAN 360°, con accumulo di tutti gli oggetti
+ * visti oltre al target) e centraggio di precisione (PHASE 1)
  */
 private const val TAG = "VisualServoing"
+private const val ROTATION_RETRIES = 2
+private const val ROTATION_RETRY_DELAY_MS = 400L
 
 class VisualServoingController(
     private val movementController: PepperMovementController,
@@ -35,33 +37,35 @@ class VisualServoingController(
     var headOnlyZone:     Float  = 0.05f
     var lpfAlpha:         Float  = 0.5f
     var maxMissedFramesApproach: Int = 7
-    var cycleDelayMs:     Long   = 250L
-
+    var cycleDelayMs:     Long   = 700L
+    var spottedMinScore: Float = 0.55f
     var centeredFrames = 0
     val centeredRequired = 3
-    var scanHeightLow:  Double = 0.3
-    var scanHeightMid:  Double = 1.0
-    var scanHeightHigh: Double = 1.8
+
+    var scanHeightLow:  Double = 0.30
+    var scanHeightMid:  Double = 1.00
 
     /*
     Parametri di Scan
 
-    Viene poi definito halfSteps che sarà la metà di scanStepRad.
-    angoli di destra 7 * 0.25rad = 1.75rad totale (circa 100°)
-    angoli di sinistra 7 * -0.25rad = -1.75rad totale (circa 100°)
-    la copertura totale non copre 360°, infatti era pensato per coprire
-    la parte della stanza d'interesse, ma cio implicherebbe comunque integrare
-    un orientamento verso il muro, quindi possibilità di cambiare gli step per
-    ottenere circa 360° di copertura quindi
+    Le rotazioni sono RELATIVE: tutti gli step hanno lo stesso segno, quindi il robot
+    percorre un giro completo e torna all'orientamento di partenza.
+      scanStepRad = 0.45 rad (circa 26°) × scanSteps = 14  ->  6.3 rad = 360°
+    La versione precedente usava 7 step positivi e 7 negativi: copriva circa 100° e poi
+    ripercorreva lo stesso settore all'indietro, lasciando i restanti 260° mai osservati.
 
-    var scanStepRad: Double = 0.25
-    var scanSteps:   Int    = 26
-    Ovviamente questo aumenterebbe il tempo di esecuzione ma permette di coprire tutta la
-    stanza -> TODO verifica in fase di sperimentazione
+    L'altezza dello sguardo NON dipende più dall'indice del passo. Prima, con idx % 3 e il
+    robot che ruotava a ogni passo, ogni settore angolare veniva osservato a una sola quota:
+    un oggetto capitato nel settore sbagliato non veniva mai inquadrato. Ora a ogni posizione
+    angolare si scatta una volta per ciascuna quota in scanHeights.
+
+    Costo: 14 rotazioni + 28 detection per scan (prima 14 + 14). Con i tempi attuali
+    (~1.8 s per frame) lo scan passa da circa 57 s a circa 95-100 s.
      */
-    var scanStepRad:      Double = 0.25
+    var scanStepRad:      Double = 0.45
     var scanSteps:        Int    = 14
-    var scanDelayMs : Long   = 300L
+    var scanDelayMs:      Long   = 700L
+    var scanHeights: List<Double> = listOf(scanHeightLow, scanHeightMid)
 
     var listener : VisualServoingListener? = null
 
@@ -92,60 +96,87 @@ class VisualServoingController(
 
         trackingJob = scope.launch {
             // ── FASE 0: SCAN ──────────────────────────────────────────────────
-            Log.i(TAG, "PHASE 0 SCAN — looking for $labels over $scanSteps steps")
-            val halfSteps = scanSteps / 2
-            val angles = buildList {
-                repeat(halfSteps) { add(scanStepRad + (Math.random() * 0.04 - 0.02)) }
-                repeat(halfSteps) { add(-scanStepRad + (Math.random() * 0.04 - 0.02)) }
-            }
+            Log.i(TAG, "PHASE 0 SCAN — looking for $labels over $scanSteps steps × ${scanHeights.size} heights")
+
+            // Tutti gli angoli hanno lo stesso segno: giro completo, non andata e ritorno.
+            val angles = List(scanSteps) { scanStepRad + (Math.random() * 0.04 - 0.02) }
 
             // Accumulo di TUTTI gli oggetti visti durante lo scan, non solo il target.
             // Dedup per label: si tiene solo la detection con score più alto vista finora.
             val spottedByLabel = mutableMapOf<String, BoundingBox>()
             var currentGazeHeight = scanHeightMid
             var found = false
+            var coveredRad = 0.0
+
             for ((idx, angle) in angles.withIndex()) {
                 if (!isActive || found) break
 
                 headController.stopGaze()
                 delay(200L)
 
-                movementController.rotateAwait(theta = angle)
-
-                val scanHeight = when (idx % 3) {
-                    0    -> scanHeightLow
-                    1    -> scanHeightMid
-                    else -> scanHeightHigh
+                // rotateAwait restituisce false su errore o cancellazione. Senza questo
+                // controllo il passo verrebbe consumato anche quando il robot non si è
+                // mosso ("Move task not started"), e la copertura reale risulterebbe
+                // inferiore a quella dichiarata.
+                var rotated = movementController.rotateAwait(theta = angle)
+                var attempt = 0
+                while (!rotated && isActive && attempt < ROTATION_RETRIES) {
+                    attempt++
+                    Log.w(TAG, "SCAN rotation idx=$idx failed — retry $attempt/$ROTATION_RETRIES")
+                    delay(ROTATION_RETRY_DELAY_MS)
+                    rotated = movementController.rotateAwait(theta = angle)
                 }
-                Log.d(TAG, "SCAN step idx=$idx angle=%.3f targetHeight=%.2f".format(angle, scanHeight))
-                headController.setGaze(normErrX = 0f, normErrY = 0f, scanMode = true, scanHeightM = scanHeight)
-                delay(scanDelayMs)
-                val bmp = captureFrame(cameraController)
-                val boxesThisFrame = if (bmp != null) runDetection(detectionController, bmp) else emptyList()
-                Log.d(TAG, "SCAN step idx=$idx detected=${boxesThisFrame.map { "${it.label}:%.2f".format(it.score) }}")
-                // Accumula ogni detection di questo frame (indipendentemente dal target),
-                // tenendo per ciascuna label lo score più alto osservato finora.
-                for (box in boxesThisFrame) {
-                    val existing = spottedByLabel[box.label]
-                    if (existing == null || box.score > existing.score) {
-                        spottedByLabel[box.label] = box
+                if (rotated) {
+                    coveredRad += angle
+                } else {
+                    Log.e(TAG, "SCAN rotation idx=$idx failed after $ROTATION_RETRIES retries — sector skipped")
+                }
+
+                for (scanHeight in scanHeights) {
+                    if (!isActive || found) break
+
+                    Log.d(TAG, "SCAN step idx=$idx angle=%.3f targetHeight=%.2f".format(angle, scanHeight))
+                    headController.setGaze(normErrX = 0f, normErrY = 0f, scanMode = true, scanHeightM = scanHeight)
+                    delay(scanDelayMs)
+
+                    val bmp = captureFrame(cameraController)
+                    val boxesThisFrame = if (bmp != null) runDetection(detectionController, bmp) else emptyList()
+                    Log.d(TAG, "SCAN idx=$idx z=%.2f detected=%s"
+                        .format(scanHeight, boxesThisFrame.map { "${it.label}:%.2f".format(it.score) }))
+
+                    // Accumula ogni detection di questo frame (indipendentemente dal target),
+                    // tenendo per ciascuna label lo score più alto osservato finora.
+                    for (box in boxesThisFrame) {
+                        if (box.score < spottedMinScore) continue
+                        val existing = spottedByLabel[box.label]
+                        if (existing == null || box.score > existing.score) {
+                            spottedByLabel[box.label] = box
+                        }
+                    }
+
+                    val hit = boxesThisFrame.bestMatch(labels)
+                    if (hit != null) {
+                        Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx height=$scanHeight")
+                        currentGazeHeight = scanHeight
+                        headController.stopGaze()
+                        delay(150L)
+                        headController.setGaze(
+                            normErrX = hit.cx - 0.5f, normErrY = hit.cy - 0.5f,
+                            scanMode = true, scanHeightM = currentGazeHeight
+                        )
+                        found = true
+                        // Nessuno stopGaze qui: la testa deve restare puntata sul target,
+                        // altrimenti PHASE 1 ripartirebbe con lo sguardo altrove.
+                    } else {
+                        headController.stopGaze()
+                        delay(150L)
                     }
                 }
-
-                val hit = boxesThisFrame.bestMatch(labels)
-
-                if (hit != null) {
-                    Log.i(TAG, "SCAN HIT [${hit.label}] score=${hit.score} idx=$idx height=$scanHeight")
-                    currentGazeHeight = scanHeight
-                    headController.stopGaze()
-                    delay(150L)
-                    headController.setGaze(
-                        normErrX = hit.cx - 0.5f, normErrY = hit.cy - 0.5f,
-                        scanMode = true, scanHeightM = currentGazeHeight
-                    )
-                    found = true
-                }
             }
+
+            // Copertura effettiva: distingue un "target non trovato" dopo un giro completo
+            // da uno dopo uno scan mutilato da rotazioni fallite.
+            Log.i(TAG, "SCAN coverage: %.0f° of 360°".format(Math.toDegrees(coveredRad)))
 
             if (spottedByLabel.isNotEmpty()) {
                 Log.i(TAG, "SCAN spotted ${spottedByLabel.size} distinct label(s): ${spottedByLabel.keys}")
@@ -245,7 +276,10 @@ class VisualServoingController(
 
                         headController.stopGaze()
                         delay(200L)
-                        movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)
+                        if (!movementController.rotateAwait(theta = theta, maxSpeed = 0.4f)) {
+                            Log.w(TAG, "PHASE 1 rotation failed — treating as stall")
+                            rotateStallCount++
+                        }
                         smoothErrX = 0f
                         smoothErrY = 0f
                         headController.setGaze(normErrX = 0f, normErrY = -0.1f, scanMode = true, scanHeightM = currentGazeHeight)
@@ -270,7 +304,9 @@ class VisualServoingController(
                             Log.i(TAG, "NEAR-ZONE CORRECTION theta=%.3f rawErrX=%.3f".format(theta, rawErrX))
                             headController.stopGaze()
                             delay(200L)
-                            movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)
+                            if (!movementController.rotateAwait(theta = theta, maxSpeed = 0.3f)) {
+                                Log.w(TAG, "NEAR-ZONE rotation failed")
+                            }
                             smoothErrX = 0f
                             smoothErrY = 0f
                         } else {

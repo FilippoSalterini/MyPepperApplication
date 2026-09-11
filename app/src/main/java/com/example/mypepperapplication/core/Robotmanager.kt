@@ -120,7 +120,7 @@ class RobotManager(
 
     companion object {
         private const val TAG = "RobotManager"
-        private const val VISUAL_SERVOING_AWAIT_TIMEOUT_MS = 90_000L
+        private const val VISUAL_SERVOING_AWAIT_TIMEOUT_MS = 180_000L
         private const val FIND_HUMAN_AWAIT_TIMEOUT_MS = 45_000L
         private const val APPROACH_HUMAN_AWAIT_TIMEOUT_MS = 60_000L
     }
@@ -740,6 +740,7 @@ class RobotManager(
                     suspendCancellableCoroutine { cont ->
                         val ah = ApproachHuman(
                             qiContext = ctx,
+                            knownHuman = lastKnownPerson,
                             listener = object : ApproachHuman.ApproachHumanListener {
                                 override fun onApproachComplete(human: Human) {
                                     if (cont.isActive) cont.resume(ApproachOutcome.Complete(human))
@@ -778,11 +779,10 @@ class RobotManager(
         val result = when {
             wasEmergency -> ActionResult.Cancelled("ApproachHuman interrotto da emergency stop")
             timedOut -> ActionResult.Cancelled("ApproachHuman non ha risposto entro il timeout (probabile stop esterno)")
-            outcome is ApproachOutcome.Complete -> ActionResult.Success(
-                ActionPayload.HumanFound(
-                    outcome.human
-                )
-            )
+            outcome is ApproachOutcome.Complete -> {
+                lastKnownPerson = outcome.human
+                ActionResult.Success(ActionPayload.HumanFound(outcome.human))
+            }
 
             outcome is ApproachOutcome.NoHuman -> ActionResult.Failure("Nessuna persona trovata da avvicinare")
             outcome is ApproachOutcome.Failed -> ActionResult.Failure("Approach fallito (troppi errori GoTo)")

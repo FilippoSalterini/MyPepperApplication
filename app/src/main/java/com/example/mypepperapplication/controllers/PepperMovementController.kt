@@ -32,9 +32,9 @@ class PepperMovementController {
         stopMovement()
         qiContext = null
     }
-    suspend fun rotateAwait(theta: Double, maxSpeed: Float = 0.3f) {
-        if (theta == 0.0) return
-        val ctx = qiContext ?: run { Log.e(TAG, "rotateAwait: QiContext NULL"); return }
+    suspend fun rotateAwait(theta: Double, maxSpeed: Float = 0.3f): Boolean {
+        if (theta == 0.0) return true
+        val ctx = qiContext ?: run { Log.e(TAG, "rotateAwait: QiContext NULL"); return false }
 
         currentGoToFuture?.requestCancellation()
         currentGoToFuture = null
@@ -44,7 +44,7 @@ class PepperMovementController {
         val freeFrame  = ctx.mapping.makeFreeFrame()
         freeFrame.update(robotFrame, transform, System.currentTimeMillis())
 
-        suspendCancellableCoroutine { cont ->
+        return suspendCancellableCoroutine { cont ->
             val future = GoToBuilder.with(ctx)
                 .withFrame(freeFrame.frame())
                 .withMaxSpeed(maxSpeed)
@@ -55,19 +55,18 @@ class PepperMovementController {
             currentGoToFuture = future
 
             future.thenConsume { f ->
-                // FIX APPLICATO: Protezione contro sovrascritture concorrenti
                 if (currentGoToFuture == future) {
                     currentGoToFuture = null
                 }
 
                 when {
-                    f.isSuccess   -> { Log.d(TAG, "rotateAwait ✓ theta=$theta"); if (cont.isActive) cont.resume(Unit) }
-                    f.isCancelled -> { Log.d(TAG, "rotateAwait cancelled");       if (cont.isActive) cont.resume(Unit) }
+                    f.isSuccess   -> { Log.d(TAG, "rotateAwait ✓ theta=$theta"); if (cont.isActive) cont.resume(true) }
+                    f.isCancelled -> { Log.d(TAG, "rotateAwait cancelled");      if (cont.isActive) cont.resume(false) }
                     f.hasError()  -> {
                         Log.e(TAG, "rotateAwait error: ${f.errorMessage}")
                         CoroutineScope(Dispatchers.Default).launch {
                             delay(300L)
-                            if (cont.isActive) cont.resume(Unit)
+                            if (cont.isActive) cont.resume(false)
                         }
                     }
                 }
@@ -75,49 +74,6 @@ class PepperMovementController {
             cont.invokeOnCancellation { future.requestCancellation() }
         }
     }
-
-    fun moveTowardAsync(distanceMeters: Double = 3.0) {
-        val ctx = qiContext ?: run { Log.e(TAG, "moveTowardAsync: QiContext NULL"); return }
-
-        currentGoToFuture?.requestCancellation()
-        currentGoToFuture = null
-
-        val robotFrame = ctx.actuation.robotFrame()
-        val transform  = TransformBuilder.create().fromXTranslation(distanceMeters)
-        val freeFrame  = ctx.mapping.makeFreeFrame()
-        freeFrame.update(robotFrame, transform, System.currentTimeMillis())
-
-        val future = GoToBuilder.with(ctx)
-            .withFrame(freeFrame.frame())
-            .withMaxSpeed(0.25f)
-            .withFinalOrientationPolicy(OrientationPolicy.ALIGN_X)
-            .build()
-            .async().run()
-
-        currentGoToFuture = future
-
-        future.thenConsume { f ->
-            // FIX APPLICATO: Anche nei flussi puramente asincroni difendiamo il puntatore globale
-            if (currentGoToFuture == future) {
-                currentGoToFuture = null
-            }
-
-            when {
-                f.isSuccess   -> Log.d(TAG, "moveTowardAsync: destination reached")
-                f.isCancelled -> Log.d(TAG, "moveTowardAsync: cancelled (normal)")
-                f.hasError() -> {
-                    val msg = f.errorMessage ?: ""
-                    if (msg.contains("No collision free path")) {
-                        Log.w(TAG, "moveTowardAsync: no path found (obstacle/angle) — continuing")
-                    } else {
-                        Log.w(TAG, "moveTowardAsync error: $msg")
-                    }
-                    if (currentGoToFuture == future) currentGoToFuture = null
-                }
-            }
-        }
-    }
-
     fun stopMovement() {
         if (currentGoToFuture != null) {
             try {
